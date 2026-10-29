@@ -1,6 +1,6 @@
 import { Random } from '../../core/Random';
 import { insetPolygon, type Vec2 } from '../../core/math';
-import { ROAD_HALF_WIDTH, SIDEWALK_WIDTH } from '../constants';
+import { INTERSECTION_RADIUS, LANE_WIDTH, SIDEWALK_WIDTH } from '../constants';
 import type { MapDecor, MapDef, MapNode, MapRoad } from '../types';
 import { boundsForPoints, decorateBlocks } from './decor';
 
@@ -70,7 +70,7 @@ export function generateRing(options: RingOptions): MapDef {
 
   const centre = insetPolygon(
     Array.from({ length: segments }, (_, i) => point(radius, i)),
-    ROAD_HALF_WIDTH + SIDEWALK_WIDTH,
+    INTERSECTION_RADIUS + SIDEWALK_WIDTH + LANE_WIDTH,
   );
   const blocks: Vec2[][] = [];
   for (let i = 0; i < segments; i++) {
@@ -86,6 +86,7 @@ export function generateRing(options: RingOptions): MapDef {
     ...decorateBlocks(blocks, new Random(options.seed), {
       parkChance: options.parkChance ?? 0.16,
       maxRadius: radius + entranceLength,
+      roadInset: INTERSECTION_RADIUS + SIDEWALK_WIDTH + LANE_WIDTH,
     }),
   );
   return {

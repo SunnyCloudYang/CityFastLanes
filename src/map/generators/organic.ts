@@ -21,6 +21,7 @@ export interface OrganicOptions {
 
 /** A reproducible pruned jitter-grid with gently curved local streets. */
 export function generateOrganic(options: OrganicOptions): MapDef {
+  const maxBend = options.curveBend ?? 6;
   const def = generateGrid({
     id: options.id,
     name: options.name,
@@ -33,10 +34,10 @@ export function generateOrganic(options: OrganicOptions): MapDef {
     parkChance: options.parkChance ?? 0.2,
     speedLimit: options.speedLimit ?? 11.5,
     lanes: options.lanes ?? 1,
+    roadClearance: maxBend / 2,
   });
   const rng = new Random(options.seed ^ 0x9e3779b9);
   const curveChance = options.curveChance ?? 0.34;
-  const maxBend = options.curveBend ?? 6;
   for (const road of def.roads) {
     if (!rng.chance(curveChance)) continue;
     const a = def.nodes[road.from];

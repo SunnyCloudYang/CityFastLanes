@@ -16,7 +16,7 @@ import {
   wrapAngle,
   type Vec2,
 } from '../core/math';
-import { LANE_WIDTH } from '../map/constants';
+import { LANE_WIDTH, laneCenterOffset } from '../map/constants';
 import type { Lane } from '../map/Lane';
 import { findRoute } from '../map/Pathfinding';
 import { RoadNetwork } from '../map/RoadNetwork';
@@ -623,8 +623,7 @@ export class World {
         (candidate) => candidate.roadId === road.id && candidate.nodeId === road.to && candidate.laneIndex === 0,
       );
       if (!from || !to || !lane) continue;
-      // The innermost forward lane is half a lane to the right of the road centreline.
-      const centreline = offsetPolyline(lane.points, -LANE_WIDTH / 2);
+      const centreline = offsetPolyline(lane.points, -laneCenterOffset(road, lane.laneIndex));
       const sidewalkOffset = Math.max(from.halfWidth, to.halfWidth) + 2;
       for (const side of [-1, 1] as const) {
         const points = offsetPolyline(centreline, side * sidewalkOffset);

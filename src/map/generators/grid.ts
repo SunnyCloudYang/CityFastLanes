@@ -1,6 +1,6 @@
 import { Random } from '../../core/Random';
 import { type Vec2 } from '../../core/math';
-import { ROAD_HALF_WIDTH } from '../constants';
+import { ROAD_HALF_WIDTH, roadHalfWidth } from '../constants';
 import { protectedLeftPhases } from '../Signals';
 import type { MapDecor, MapDef, MapNode, MapRoad } from '../types';
 import { decorateBlocks } from './decor';
@@ -22,6 +22,8 @@ export interface GridOptions {
   lanes?: number;
   /** Use separate protected-left phases at four-way intersections. */
   protectedLeft?: boolean;
+  /** Additional carriageway clearance reserved for subsequently curved roads. */
+  roadClearance?: number;
   /** A north-south river after column `afterCol`, crossed only on `bridgeRows`. */
   river?: { afterCol: number; width: number; bridgeRows: number[] };
 }
@@ -81,6 +83,7 @@ export function generateGrid(o: GridOptions): MapDef {
   const decor: MapDecor[] = decorateBlocks(blocks, rng, {
     parkChance: o.parkChance,
     maxRadius: Math.max(totalW, totalH) * 0.6,
+    roadInset: roadHalfWidth({ lanes: o.lanes }) + (o.roadClearance ?? 0),
   });
 
   if (river) {

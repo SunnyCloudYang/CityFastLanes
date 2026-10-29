@@ -1,20 +1,23 @@
 import type { Random } from '../../core/Random';
 import { insetPolygon, lerpVec, type Vec2 } from '../../core/math';
-import { ROAD_HALF_WIDTH, SIDEWALK_WIDTH } from '../constants';
+import { INTERSECTION_RADIUS, ROAD_HALF_WIDTH, SIDEWALK_WIDTH } from '../constants';
 import type { Bounds, MapDecor } from '../types';
 
 export interface BlockDecorOptions {
   parkChance?: number;
   /** Distance scale used to make central buildings taller. */
   maxRadius: number;
+  /** Carriageway clearance, including any additional curve allowance. */
+  roadInset?: number;
 }
 
 /** Adds a block footprint, then either a park or deterministic building lots. */
 export function decorateBlocks(blocks: Vec2[][], rng: Random, options: BlockDecorOptions): MapDecor[] {
   const decor: MapDecor[] = [];
   const maxR = Math.max(1, options.maxRadius);
+  const roadInset = Math.max(options.roadInset ?? ROAD_HALF_WIDTH, INTERSECTION_RADIUS);
   for (const quad of blocks) {
-    const block = insetPolygon(quad, ROAD_HALF_WIDTH);
+    const block = insetPolygon(quad, roadInset);
     decor.push({ type: 'block', polygon: block });
     const lot = insetPolygon(block, SIDEWALK_WIDTH);
     if (rng.chance(options.parkChance ?? 0.1)) {

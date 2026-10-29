@@ -12,7 +12,7 @@ import {
   wrapAngle,
   type Vec2,
 } from '../core/math';
-import { INTERSECTION_RADIUS, LANE_WIDTH } from './constants';
+import { INTERSECTION_RADIUS, LANE_WIDTH, laneCenterOffset, roadHalfWidth } from './constants';
 import { Lane, type TurnType } from './Lane';
 import { SignalController, type SignalPhase } from './Signals';
 import type { MapDef, MapRoad } from './types';
@@ -99,7 +99,7 @@ export class RoadNetwork {
     const backward: Lane[] = [];
     const last = geometry.points.length - 1;
     for (let i = 0; i < count; i++) {
-      const h = (i + 0.5) * LANE_WIDTH;
+      const h = laneCenterOffset(road, i);
       const f = this.makeLane('road', offsetPoints(geometry, h), road.speedLimit);
       this.setRoadMetadata(f, road, i, count, b.id);
       this.roadTangents.set(f, { start: geometry.tangents[0], end: geometry.tangents[last] });
@@ -123,7 +123,7 @@ export class RoadNetwork {
     linkSiblings(backward);
     a.dirs.push(geometry.tangents[0]);
     b.dirs.push(scale(geometry.tangents[last], -1));
-    a.halfWidth = b.halfWidth = Math.max(a.halfWidth, (count * LANE_WIDTH) / 2 + LANE_WIDTH / 2);
+    a.halfWidth = b.halfWidth = Math.max(a.halfWidth, roadHalfWidth(road));
   }
 
   private setRoadMetadata(lane: Lane, road: MapRoad, index: number, count: number, nodeId: number): void {

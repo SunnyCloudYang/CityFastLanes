@@ -1,6 +1,6 @@
 import { Random } from '../../core/Random';
 import { insetPolygon, type Vec2 } from '../../core/math';
-import { ROAD_HALF_WIDTH, SIDEWALK_WIDTH } from '../constants';
+import { INTERSECTION_RADIUS, ROAD_HALF_WIDTH, SIDEWALK_WIDTH } from '../constants';
 import type { MapDecor, MapDef, MapNode, MapRoad } from '../types';
 import { boundsForPoints, decorateBlocks } from './decor';
 
@@ -75,7 +75,7 @@ export function generateRadial(options: RadialOptions): MapDef {
   }
   const centre = insetPolygon(
     Array.from({ length: spokes }, (_, spoke) => point(spacing, spoke)),
-    ROAD_HALF_WIDTH + SIDEWALK_WIDTH,
+    Math.max(INTERSECTION_RADIUS, ROAD_HALF_WIDTH + SIDEWALK_WIDTH),
   );
   const decor: MapDecor[] = [{ type: 'park', polygon: centre }];
   decor.push(

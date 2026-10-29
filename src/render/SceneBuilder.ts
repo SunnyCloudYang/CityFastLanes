@@ -1,7 +1,13 @@
 import * as THREE from 'three';
 import { Random } from '../core/Random';
 import { add, angleOf, distance, lerpVec, normalize, polygonArea, rightOf, scale, sub, type Vec2 } from '../core/math';
-import { LANE_WIDTH } from '../map/constants';
+import {
+  CROSSWALK_DISTANCE,
+  LANE_WIDTH,
+  laneCenterOffset,
+  roadHalfWidth as getRoadHalfWidth,
+  STOP_LINE_DISTANCE,
+} from '../map/constants';
 import type { RoadNetwork } from '../map/RoadNetwork';
 import type { LightState, SignalController } from '../map/Signals';
 
@@ -102,9 +108,9 @@ export function buildScene(net: RoadNetwork): BuiltScene {
     if (!reference) continue;
     const centres = reference.points.map((p, i) => {
       const t = reference.pointAt(reference.cum[Math.min(i, reference.cum.length - 1)]).t;
-      return sub(p, scale(rightOf(t), (reference.laneIndex + 0.5) * LANE_WIDTH));
+      return sub(p, scale(rightOf(t), laneCenterOffset(road, reference.laneIndex)));
     });
-    const roadHalfWidth = ((road.lanes ?? 1) * LANE_WIDTH * (road.oneWay ? 1 : 2)) / 2;
+    const roadHalfWidth = getRoadHalfWidth(road);
     for (let i = 0; i < centres.length - 1; i++) {
       const a = centres[i];
       const c = centres[i + 1];
@@ -136,7 +142,7 @@ export function buildScene(net: RoadNetwork): BuiltScene {
   // Stop lines and zebra crossings at every road approach.
   for (const lane of net.roadLanes) {
     const { t } = lane.pointAt(lane.length);
-    dashMatrices.push(placeFlat(sub(lane.end, scale(t, 0.4)), angleOf(t), 0.45, LANE_WIDTH - 0.3, Y.marking));
+    dashMatrices.push(placeFlat(sub(lane.end, scale(t, STOP_LINE_DISTANCE)), angleOf(t), 0.45, LANE_WIDTH - 0.3, Y.marking));
   }
   const crosswalkRoads = new Set<number>();
   for (const lane of net.roadLanes) {
@@ -145,9 +151,9 @@ export function buildScene(net: RoadNetwork): BuiltScene {
     const road = def.roads.find((item) => item.id === lane.roadId)!;
     const t = lane.pointAt(lane.length).t;
     const width = (road.lanes ?? 1) * LANE_WIDTH * (road.oneWay ? 1 : 2);
-    const centre = sub(lane.end, scale(rightOf(t), (lane.laneIndex + 0.5) * LANE_WIDTH));
+    const centre = sub(lane.end, scale(rightOf(t), laneCenterOffset(road, lane.laneIndex)));
     for (let offset = -width / 2 + 0.35; offset < width / 2; offset += 0.85) {
-      const p = add(sub(centre, scale(t, 2.2)), scale(rightOf(t), offset));
+      const p = add(sub(centre, scale(t, CROSSWALK_DISTANCE)), scale(rightOf(t), offset));
       dashMatrices.push(placeFlat(p, angleOf(t), 1.7, 0.48, Y.marking));
     }
   }
@@ -212,7 +218,7 @@ export function buildScene(net: RoadNetwork): BuiltScene {
   for (const lane of net.roadLanes) {
     if (!lane.signal) continue;
     const { t } = lane.pointAt(lane.length);
-    const p = add(sub(lane.end, scale(t, 0.6)), scale(rightOf(t), LANE_WIDTH / 2 + 1.4));
+    const p = add(sub(lane.end, scale(t, STOP_LINE_DISTANCE + 0.2)), scale(rightOf(t), LANE_WIDTH / 2 + 1.4));
     const pole = new THREE.Mesh(poleGeo, mats.pole);
     pole.position.set(p.x, 1.8, p.y);
     const head = new THREE.Mesh(headGeo, mats.pole);

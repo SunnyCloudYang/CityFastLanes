@@ -1,11 +1,13 @@
+import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { distance, dot, scale, type Vec2 } from '../src/core/math';
+import { distance, dot, scale, sub, type Vec2 } from '../src/core/math';
 import { LANE_WIDTH } from '../src/map/constants';
 import type { Lane } from '../src/map/Lane';
 import { parseMap, serializeMap } from '../src/map/MapJson';
 import { MAPS } from '../src/map/maps';
 import { findRoute } from '../src/map/Pathfinding';
 import { RoadNetwork } from '../src/map/RoadNetwork';
+import { buildScene } from '../src/render/SceneBuilder';
 import { generateOrganic } from '../src/map/generators/organic';
 import { generateRadial } from '../src/map/generators/radial';
 import { generateRing } from '../src/map/generators/ring';
@@ -80,6 +82,8 @@ describe('M3 curved road network', () => {
     const net = new RoadNetwork(twoNodeMap({ x: 50, y: 20 }, true));
     expect(net.roadLanes).toHaveLength(2);
     for (const lane of net.roadLanes) expect(lane.start.x).toBeLessThan(lane.end.x);
+    const straight = new RoadNetwork(twoNodeMap(undefined, true));
+    expect(straight.roadLanes.map((lane) => lane.start.y)).toEqual([-LANE_WIDTH / 2, LANE_WIDTH / 2]);
     expect(net.nodes.get(0)!.incoming).toHaveLength(0);
     expect(net.nodes.get(1)!.outgoing).toHaveLength(0);
     expect(net.nodes.get(0)!.outgoing).toHaveLength(2);
@@ -125,6 +129,34 @@ describe.each(generatorCases)('M3 %s generator', (id, build, nodeCount) => {
       for (const lane of node.incoming) {
         const end = scale(lane.pointAt(lane.length).t, -1);
         expect(Math.max(...node.dirs.map((dir) => dot(dir, end)))).toBeGreaterThan(0.98);
+      }
+    }
+  });
+});
+
+function pointInPolygon(point: Vec2, polygon: Vec2[]): boolean {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const a = polygon[i];
+    const b = polygon[j];
+    if ((a.y > point.y) !== (b.y > point.y) && point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+describe.each(MAPS)('map $id road clearance', (entry) => {
+  it('keeps road lane centrelines off raised sidewalk blocks', () => {
+    const def = entry.build();
+    const net = new RoadNetwork(def);
+    const blocks = def.decor.filter((item) => item.type === 'block');
+    for (const lane of net.roadLanes) {
+      for (let s = 12; s < lane.length - 12; s += 2) {
+        const point = lane.pointAt(s).p;
+        for (const block of blocks) {
+          expect(pointInPolygon(point, block.polygon), `lane ${lane.id} enters a raised block at s=${s}`).toBe(false);
+        }
       }
     }
   });
@@ -179,6 +211,46 @@ function editedJson(edit: (value: any) => void): string {
   edit(value);
   return JSON.stringify(value);
 }
+
+describe('road approach markings', () => {
+  it('places the stop line before the zebra crossing in the direction of travel', () => {
+    const def = twoNodeMap();
+    def.nodes.push({ id: 2, x: 100, y: 100 }, { id: 3, x: 100, y: -100 });
+    def.roads.push(
+      { id: 5, from: 1, to: 2, speedLimit: 14 },
+      { id: 6, from: 1, to: 3, speedLimit: 14 },
+    );
+    const net = new RoadNetwork(def);
+    const scene = buildScene(net);
+    const markings = scene.root.children.find(
+      (child) => child instanceof THREE.InstancedMesh && child.geometry instanceof THREE.BoxGeometry,
+    ) as THREE.InstancedMesh;
+    const stops: Vec2[] = [];
+    const crosswalks: Vec2[] = [];
+    const matrix = new THREE.Matrix4();
+    const position = new THREE.Vector3();
+    const rotation = new THREE.Quaternion();
+    const size = new THREE.Vector3();
+    for (let i = 0; i < markings.count; i++) {
+      markings.getMatrixAt(i, matrix);
+      matrix.decompose(position, rotation, size);
+      if (Math.abs(size.x - 0.45) < 1e-6) stops.push({ x: position.x, y: position.z });
+      if (Math.abs(size.x - 1.7) < 1e-6) crosswalks.push({ x: position.x, y: position.z });
+    }
+    scene.dispose();
+
+    const lane = net.roadLanes.find((candidate) => candidate.roadId === 4 && candidate.nodeId === 1)!;
+    const { t } = lane.pointAt(lane.length);
+    const stop = stops.reduce((best, point) => (distance(point, lane.end) < distance(best, lane.end) ? point : best));
+    const stopDistance = dot(sub(lane.end, stop), t);
+    const crossingDistances = crosswalks
+      .filter((point) => Math.abs(dot(sub(point, lane.end), { x: -t.y, y: t.x })) < 3.5)
+      .map((point) => dot(sub(lane.end, point), t))
+      .filter((along) => along > 0 && along < 9);
+    expect(crossingDistances.length).toBeGreaterThan(0);
+    for (const crossingDistance of crossingDistances) expect(stopDistance).toBeGreaterThan(crossingDistance);
+  });
+});
 
 describe('MapJson', () => {
   it.each(MAPS)('round-trips $id without losing map data', (entry) => {

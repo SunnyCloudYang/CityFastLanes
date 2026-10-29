@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { Vec2 } from '../src/core/math';
 import { findRoute } from '../src/map/Pathfinding';
 import { MAPS } from '../src/map/maps';
 import { RoadNetwork } from '../src/map/RoadNetwork';
@@ -30,6 +31,28 @@ function motorOverlaps(w: World): number {
     }
   }
   return n;
+}
+
+function pointInPolygon(point: Vec2, polygon: Vec2[]): boolean {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const a = polygon[i];
+    const b = polygon[j];
+    if ((a.y > point.y) !== (b.y > point.y) && point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+function sidewalkEntries(w: World): number {
+  const blocks = w.def.decor.filter((item) => item.type === 'block');
+  let count = 0;
+  for (const vehicle of w.vehicles) {
+    if (vehicle.controller !== 'ai' || vehicle.lane?.kind !== 'road') continue;
+    if (blocks.some((block) => pointInPolygon(vehicle.pos, block.polygon))) count++;
+  }
+  return count;
 }
 
 function mixedOverlaps(w: World): number {
@@ -80,6 +103,7 @@ describe.each(MAPS)('map $id', (entry) => {
     expect(w.count(false)).toBeGreaterThanOrEqual(60);
     let overlaps = 0;
     let crossClassOverlaps = 0;
+    let sidewalkCount = 0;
     let speedSum = 0;
     let samples = 0;
     for (let i = 0; i < 60 * 120; i++) {
@@ -87,6 +111,7 @@ describe.each(MAPS)('map $id', (entry) => {
       if (i % 30 === 0) {
         overlaps += motorOverlaps(w);
         crossClassOverlaps += mixedOverlaps(w);
+        sidewalkCount += sidewalkEntries(w);
       }
       if (i > 60 * 60 && i % 60 === 0) {
         for (const v of w.vehicles) speedSum += v.speed;
@@ -96,11 +121,12 @@ describe.each(MAPS)('map $id', (entry) => {
     const meanSpeed = speedSum / samples;
     const maxStuck = Math.max(...w.vehicles.map((v) => v.stuckTime));
     console.log(
-      `${entry.id}: vehicles=${w.vehicles.length} meanSpeed=${meanSpeed.toFixed(2)} overlaps=${overlaps} mixed=${crossClassOverlaps} maxStuck=${maxStuck.toFixed(1)}`,
+      `${entry.id}: vehicles=${w.vehicles.length} meanSpeed=${meanSpeed.toFixed(2)} overlaps=${overlaps} mixed=${crossClassOverlaps} sidewalk=${sidewalkCount} maxStuck=${maxStuck.toFixed(1)}`,
     );
     expect(meanSpeed).toBeGreaterThan(2);
     expect(overlaps).toBeLessThan(5);
     expect(crossClassOverlaps).toBeLessThan(20);
+    expect(sidewalkCount).toBe(0);
     expect(maxStuck).toBeLessThan(90);
   });
 

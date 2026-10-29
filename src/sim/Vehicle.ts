@@ -102,7 +102,7 @@ export const SPECS: Record<VehicleKind, VehicleSpec> = {
     maxSpeed: 9,
     idmAccel: 1,
     desiredSpeed: 5,
-    laneOffset: 1.65,
+    laneOffset: 1.35,
     eyeHeight: 1.65,
     eyeForward: 0.05,
   },
