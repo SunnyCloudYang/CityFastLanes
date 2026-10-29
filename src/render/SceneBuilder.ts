@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Random } from '../core/Random';
 import { add, angleOf, distance, lerpVec, normalize, polygonArea, rightOf, scale, sub, type Vec2 } from '../core/math';
-import { INTERSECTION_RADIUS, LANE_WIDTH, ROAD_HALF_WIDTH } from '../map/constants';
+import { LANE_WIDTH } from '../map/constants';
 import type { RoadNetwork } from '../map/RoadNetwork';
 import type { LightState, SignalController } from '../map/Signals';
 
@@ -98,40 +98,58 @@ export function buildScene(net: RoadNetwork): BuiltScene {
     return dummy.matrix.clone();
   };
   for (const road of def.roads) {
-    const a = net.nodes.get(road.from)!.pos;
-    const c = net.nodes.get(road.to)!.pos;
-    const len = distance(a, c);
-    const ang = angleOf(sub(c, a));
-    const mid = lerpVec(a, c, 0.5);
-    const strip = new THREE.Mesh(new THREE.PlaneGeometry(len, ROAD_HALF_WIDTH * 2).rotateX(-Math.PI / 2), mats.asphalt);
-    strip.position.set(mid.x, Y.road, mid.y);
-    strip.rotation.y = -ang;
-    strip.receiveShadow = true;
-    root.add(strip);
-
-    const d = normalize(sub(c, a));
-    const inner = len - INTERSECTION_RADIUS * 2;
-    for (let s = 1.5; s < inner - 1.5; s += 6) {
-      dashMatrices.push(placeFlat(add(a, scale(d, INTERSECTION_RADIUS + s + 1.5)), ang, 3, 0.18, Y.marking));
-    }
-
-    if (road.bridge) {
-      const n = rightOf(d);
-      for (const side of [1, -1]) {
-        const rail = new THREE.Mesh(new THREE.BoxGeometry(inner, 0.9, 0.35), mats.rail);
-        const p = add(mid, scale(n, side * (ROAD_HALF_WIDTH + 0.3)));
-        rail.position.set(p.x, 0.45, p.y);
-        rail.rotation.y = -ang;
-        rail.castShadow = true;
-        root.add(rail);
+    const reference = net.roadLanes.find((lane) => lane.roadId === road.id);
+    if (!reference) continue;
+    const centres = reference.points.map((p, i) => {
+      const t = reference.pointAt(reference.cum[Math.min(i, reference.cum.length - 1)]).t;
+      return sub(p, scale(rightOf(t), (reference.laneIndex + 0.5) * LANE_WIDTH));
+    });
+    const roadHalfWidth = ((road.lanes ?? 1) * LANE_WIDTH * (road.oneWay ? 1 : 2)) / 2;
+    for (let i = 0; i < centres.length - 1; i++) {
+      const a = centres[i];
+      const c = centres[i + 1];
+      const len = distance(a, c);
+      if (len < 0.01) continue;
+      const d = normalize(sub(c, a));
+      const ang = angleOf(d);
+      const mid = lerpVec(a, c, 0.5);
+      const strip = new THREE.Mesh(new THREE.PlaneGeometry(len + 0.08, roadHalfWidth * 2).rotateX(-Math.PI / 2), mats.asphalt);
+      strip.position.set(mid.x, Y.road, mid.y);
+      strip.rotation.y = -ang;
+      strip.receiveShadow = true;
+      root.add(strip);
+      for (let s = 1.5; s < len - 1; s += 6) dashMatrices.push(placeFlat(add(a, scale(d, s)), ang, 3, 0.18, Y.marking));
+      if (road.bridge) {
+        const n = rightOf(d);
+        for (const side of [1, -1]) {
+          const rail = new THREE.Mesh(new THREE.BoxGeometry(len + 0.1, 0.9, 0.35), mats.rail);
+          const p = add(mid, scale(n, side * (roadHalfWidth + 0.3)));
+          rail.position.set(p.x, 0.45, p.y);
+          rail.rotation.y = -ang;
+          rail.castShadow = true;
+          root.add(rail);
+        }
       }
     }
   }
 
-  // Stop lines at every lane entering an intersection.
+  // Stop lines and zebra crossings at every road approach.
   for (const lane of net.roadLanes) {
     const { t } = lane.pointAt(lane.length);
     dashMatrices.push(placeFlat(sub(lane.end, scale(t, 0.4)), angleOf(t), 0.45, LANE_WIDTH - 0.3, Y.marking));
+  }
+  const crosswalkRoads = new Set<number>();
+  for (const lane of net.roadLanes) {
+    if (crosswalkRoads.has(lane.roadId) || !lane.signal) continue;
+    crosswalkRoads.add(lane.roadId);
+    const road = def.roads.find((item) => item.id === lane.roadId)!;
+    const t = lane.pointAt(lane.length).t;
+    const width = (road.lanes ?? 1) * LANE_WIDTH * (road.oneWay ? 1 : 2);
+    const centre = sub(lane.end, scale(rightOf(t), (lane.laneIndex + 0.5) * LANE_WIDTH));
+    for (let offset = -width / 2 + 0.35; offset < width / 2; offset += 0.85) {
+      const p = add(sub(centre, scale(t, 2.2)), scale(rightOf(t), offset));
+      dashMatrices.push(placeFlat(p, angleOf(t), 1.7, 0.48, Y.marking));
+    }
   }
   const dashes = new THREE.InstancedMesh(unitBox, mats.marking, dashMatrices.length);
   dashMatrices.forEach((m, i) => dashes.setMatrixAt(i, m));

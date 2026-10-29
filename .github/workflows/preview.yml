@@ -1,0 +1,45 @@
+name: preview
+
+on:
+  push:
+    branches:
+      - develop
+      - 'feature/**'
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: cloudflare-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ github.ref_name == 'develop' && 'stage' || 'preview' }}
+      url: ${{ steps.deployment.outputs.deployment-url }}
+    env:
+      VITE_APP_ENV: ${{ github.ref_name == 'develop' && 'staging' || 'preview' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - id: deployment
+        name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          command: pages deploy dist --project-name=city-fast-lanes-preview --branch="${{ github.ref_name }}" --commit-hash="${{ github.sha }}"
+      - name: Write preview URL
+        env:
+          PREVIEW_URL: ${{ steps.deployment.outputs.deployment-url }}
+        run: printf '\n[Cloudflare preview](%s)\n' "$PREVIEW_URL" >> "$GITHUB_STEP_SUMMARY"

@@ -4,6 +4,7 @@ import type { SignalController } from './Signals';
 
 export type LaneKind = 'road' | 'connector';
 export type TurnType = 'straight' | 'left' | 'right' | 'uturn';
+export type TrafficClass = 'all' | 'motor' | 'bike';
 
 export interface LanePoint {
   p: Vec2;
@@ -24,6 +25,14 @@ export class Lane {
   conflicts: Lane[] = [];
   turn: TurnType = 'straight';
   roadId = -1;
+  /** Zero is the leftmost (centre-side) lane in the direction of travel. */
+  laneIndex = 0;
+  laneCount = 1;
+  left: Lane | null = null;
+  right: Lane | null = null;
+  traffic: TrafficClass = 'all';
+  /** Additional right-hand offset used by independent bike connectors. */
+  bikeOffset = 0;
   /** Road lane: the node it drives into. Connector: the node it belongs to. */
   nodeId = -1;
   signal: { ctrl: SignalController; group: number } | null = null;

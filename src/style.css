@@ -123,3 +123,139 @@ button.active {
   font-size: 30px;
   line-height: 1.1;
 }
+
+#panel-toggle {
+  float: right;
+  padding: 0 7px;
+}
+
+details {
+  border-top: 1px dashed rgba(43, 43, 51, 0.35);
+  margin-top: 6px;
+  padding-top: 4px;
+}
+
+summary {
+  cursor: pointer;
+  user-select: none;
+}
+
+.wrap {
+  flex-wrap: wrap;
+}
+
+#toast {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 7px 15px;
+  border-radius: 8px;
+  background: var(--ink);
+  color: var(--paper);
+  opacity: 0;
+  transition: opacity 0.2s;
+  max-width: min(600px, 85vw);
+  text-align: center;
+}
+
+#toast.visible {
+  opacity: 1;
+}
+
+#touch-controls {
+  display: none;
+}
+
+#app canvas {
+  touch-action: none;
+}
+
+@media (max-width: 700px), (pointer: coarse) {
+  #panel-controls {
+    top: 8px;
+    left: 8px;
+    width: min(270px, calc(100vw - 16px));
+    max-height: 48vh;
+    overflow: auto;
+    font-size: 13px;
+    padding: 7px 10px;
+  }
+
+  #panel-controls.collapsed #panel-body {
+    display: none;
+  }
+
+  #panel-controls h1 {
+    font-size: 18px;
+    margin: 0;
+  }
+
+  #status {
+    top: auto;
+    right: 8px;
+    bottom: 150px;
+    min-width: 145px;
+    font-size: 12px;
+    padding: 7px 10px;
+  }
+
+  #status .mode {
+    font-size: 15px;
+  }
+
+  #status .speed {
+    font-size: 24px;
+  }
+
+  #help {
+    display: none;
+  }
+
+  #touch-controls {
+    display: flex;
+    position: absolute;
+    inset: auto 16px 18px;
+    align-items: flex-end;
+    justify-content: space-between;
+    pointer-events: none;
+  }
+
+  #touch-joystick {
+    width: 116px;
+    height: 116px;
+    border: 2px solid var(--ink);
+    border-radius: 50%;
+    background: rgba(250, 247, 240, 0.55);
+    pointer-events: auto;
+    touch-action: none;
+    display: grid;
+    place-items: center;
+  }
+
+  #touch-knob {
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    background: rgba(43, 43, 51, 0.72);
+    pointer-events: none;
+  }
+
+  #touch-actions {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+    pointer-events: auto;
+  }
+
+  #touch-actions button {
+    min-width: 52px;
+    min-height: 48px;
+    background: rgba(250, 247, 240, 0.88);
+    touch-action: none;
+  }
+
+  #touch-brake {
+    min-height: 68px !important;
+  }
+}

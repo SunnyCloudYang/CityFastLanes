@@ -32,6 +32,38 @@ function motorOverlaps(w: World): number {
   return n;
 }
 
+function mixedOverlaps(w: World): number {
+  let n = 0;
+  const vehicles = w.vehicles;
+  for (let i = 0; i < vehicles.length; i++) {
+    for (let j = i + 1; j < vehicles.length; j++) {
+      const a = vehicles[i];
+      const b = vehicles[j];
+      if (a.isBike === b.isBike) continue;
+      if (Math.abs(a.pos.x - b.pos.x) > 8 || Math.abs(a.pos.y - b.pos.y) > 8) continue;
+      const mtv = satMTV(a.corners(), b.corners());
+      if (mtv && Math.hypot(mtv.x, mtv.y) > 0.3) n++;
+    }
+  }
+  return n;
+}
+
+describe('M2 traffic rules', () => {
+  it('builds parallel lanes, class-specific connectors and protected phases', () => {
+    const net = new RoadNetwork(MAPS[0].build());
+    expect(net.roadLanes.some((lane) => lane.laneCount === 2 && lane.right !== null)).toBe(true);
+    expect(net.connectors.some((lane) => lane.traffic === 'bike')).toBe(true);
+    expect(net.connectors.some((lane) => lane.traffic === 'motor')).toBe(true);
+    expect(net.signals.some((signal) => signal.phases.length === 4)).toBe(true);
+  });
+
+  it('uses MOBIL to overtake with smooth lane transitions', () => {
+    const w = new World(MAPS[0].build(), 50, 10);
+    for (let i = 0; i < 60 * 60; i++) w.step(1 / 60);
+    expect(w.vehicles.reduce((sum, v) => sum + v.laneChanges, 0)).toBeGreaterThan(0);
+  });
+});
+
 describe.each(MAPS)('map $id', (entry) => {
   it('every road lane can reach every other', () => {
     const net = new RoadNetwork(entry.build());
@@ -47,20 +79,29 @@ describe.each(MAPS)('map $id', (entry) => {
     const w = new World(entry.build(), 70, 20);
     expect(w.count(false)).toBeGreaterThanOrEqual(60);
     let overlaps = 0;
+    let crossClassOverlaps = 0;
     let speedSum = 0;
     let samples = 0;
     for (let i = 0; i < 60 * 120; i++) {
       w.step(1 / 60);
-      if (i % 30 === 0) overlaps += motorOverlaps(w);
+      if (i % 30 === 0) {
+        overlaps += motorOverlaps(w);
+        crossClassOverlaps += mixedOverlaps(w);
+      }
       if (i > 60 * 60 && i % 60 === 0) {
         for (const v of w.vehicles) speedSum += v.speed;
         samples += w.vehicles.length;
       }
     }
     const meanSpeed = speedSum / samples;
-    console.log(`${entry.id}: vehicles=${w.vehicles.length} meanSpeed=${meanSpeed.toFixed(2)} overlaps=${overlaps}`);
+    const maxStuck = Math.max(...w.vehicles.map((v) => v.stuckTime));
+    console.log(
+      `${entry.id}: vehicles=${w.vehicles.length} meanSpeed=${meanSpeed.toFixed(2)} overlaps=${overlaps} mixed=${crossClassOverlaps} maxStuck=${maxStuck.toFixed(1)}`,
+    );
     expect(meanSpeed).toBeGreaterThan(2);
     expect(overlaps).toBeLessThan(5);
+    expect(crossClassOverlaps).toBeLessThan(20);
+    expect(maxStuck).toBeLessThan(90);
   });
 
   it('a released player vehicle rejoins traffic', () => {

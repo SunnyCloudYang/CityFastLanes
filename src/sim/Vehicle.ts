@@ -1,7 +1,8 @@
 import { clamp, wrapAngle, type Vec2 } from '../core/math';
 import type { Lane } from '../map/Lane';
 
-export type VehicleKind = 'car' | 'van' | 'bike';
+export const VEHICLE_KINDS = ['car', 'van', 'bus', 'taxi', 'motorcycle', 'bike'] as const;
+export type VehicleKind = (typeof VEHICLE_KINDS)[number];
 
 export interface VehicleSpec {
   length: number;
@@ -49,6 +50,48 @@ export const SPECS: Record<VehicleKind, VehicleSpec> = {
     eyeHeight: 1.85,
     eyeForward: 1.9,
   },
+  bus: {
+    length: 10.5,
+    width: 2.5,
+    wheelbase: 5.6,
+    maxSteer: 0.45,
+    maxAccel: 1.5,
+    maxBrake: 5,
+    maxSpeed: 16,
+    idmAccel: 0.85,
+    desiredSpeed: 11,
+    laneOffset: 0,
+    eyeHeight: 2.2,
+    eyeForward: 3.4,
+  },
+  taxi: {
+    length: 4.4,
+    width: 1.8,
+    wheelbase: 2.6,
+    maxSteer: 0.6,
+    maxAccel: 3.1,
+    maxBrake: 7,
+    maxSpeed: 22,
+    idmAccel: 1.55,
+    desiredSpeed: 14.5,
+    laneOffset: 0,
+    eyeHeight: 1.3,
+    eyeForward: 0.6,
+  },
+  motorcycle: {
+    length: 2.2,
+    width: 0.7,
+    wheelbase: 1.45,
+    maxSteer: 0.65,
+    maxAccel: 3.8,
+    maxBrake: 6,
+    maxSpeed: 20,
+    idmAccel: 1.8,
+    desiredSpeed: 13,
+    laneOffset: 0,
+    eyeHeight: 1.55,
+    eyeForward: 0.25,
+  },
   bike: {
     length: 1.8,
     width: 0.6,
@@ -59,7 +102,7 @@ export const SPECS: Record<VehicleKind, VehicleSpec> = {
     maxSpeed: 9,
     idmAccel: 1,
     desiredSpeed: 5,
-    laneOffset: 1.2,
+    laneOffset: 1.65,
     eyeHeight: 1.65,
     eyeForward: 0.05,
   },
@@ -68,7 +111,7 @@ export const SPECS: Record<VehicleKind, VehicleSpec> = {
 let nextId = 1;
 
 export class Vehicle {
-  readonly id = nextId++;
+  readonly id: number;
   readonly spec: VehicleSpec;
   readonly prevPos: Vec2;
   prevHeading: number;
@@ -77,12 +120,20 @@ export class Vehicle {
   controller: 'ai' | 'player' = 'ai';
 
   lane: Lane | null = null;
+  /** Previous lane still occupied by the rear of a long vehicle. */
+  trailLane: Lane | null = null;
   /** Arc length along `lane`. */
   s = 0;
   /** Lanes to drive after `lane`. */
   route: Lane[] = [];
   /** Connector this vehicle has been granted. */
   reserved: Lane | null = null;
+  /** A smooth lateral transition between parallel road lanes. */
+  laneChange: { from: Lane; offset: number; progress: number; duration: number } | null = null;
+  laneChangeCooldown = 0;
+  laneChanges = 0;
+  stopTimer = 0;
+  lastStopLane = -1;
   stuckTime = 0;
 
   input = { throttle: 0, steer: 0, handbrake: false };
@@ -93,7 +144,10 @@ export class Vehicle {
     public heading: number,
     readonly color: number,
     readonly driverFactor: number,
+    id?: number,
   ) {
+    this.id = id ?? nextId++;
+    if (id !== undefined) nextId = Math.max(nextId, id + 1);
     this.spec = SPECS[kind];
     this.prevPos = { ...pos };
     this.prevHeading = heading;

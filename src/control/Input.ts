@@ -13,6 +13,9 @@ function isFormField(t: EventTarget | null): boolean {
 
 export class Input {
   private readonly down = new Set<string>();
+  touchThrottle = 0;
+  touchSteer = 0;
+  touchHandbrake = false;
 
   constructor(onAction: (code: string) => void) {
     window.addEventListener('keydown', (e) => {
@@ -30,14 +33,16 @@ export class Input {
   }
 
   get throttle(): number {
-    return (this.isDown('KeyW', 'ArrowUp') ? 1 : 0) - (this.isDown('KeyS', 'ArrowDown') ? 1 : 0);
+    const keyboard = (this.isDown('KeyW', 'ArrowUp') ? 1 : 0) - (this.isDown('KeyS', 'ArrowDown') ? 1 : 0);
+    return Math.max(-1, Math.min(1, keyboard + this.touchThrottle));
   }
 
   get steer(): number {
-    return (this.isDown('KeyD', 'ArrowRight') ? 1 : 0) - (this.isDown('KeyA', 'ArrowLeft') ? 1 : 0);
+    const keyboard = (this.isDown('KeyD', 'ArrowRight') ? 1 : 0) - (this.isDown('KeyA', 'ArrowLeft') ? 1 : 0);
+    return Math.max(-1, Math.min(1, keyboard + this.touchSteer));
   }
 
   get handbrake(): boolean {
-    return this.isDown('Space');
+    return this.isDown('Space') || this.touchHandbrake;
   }
 }

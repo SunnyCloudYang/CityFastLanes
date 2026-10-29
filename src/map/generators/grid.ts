@@ -1,7 +1,9 @@
 import { Random } from '../../core/Random';
-import { insetPolygon, lerpVec, type Vec2 } from '../../core/math';
-import { ROAD_HALF_WIDTH, SIDEWALK_WIDTH } from '../constants';
+import { type Vec2 } from '../../core/math';
+import { ROAD_HALF_WIDTH } from '../constants';
+import { protectedLeftPhases } from '../Signals';
 import type { MapDecor, MapDef, MapNode, MapRoad } from '../types';
+import { decorateBlocks } from './decor';
 
 export interface GridOptions {
   id: string;
@@ -16,6 +18,10 @@ export interface GridOptions {
   removeRatio?: number;
   parkChance?: number;
   speedLimit?: number;
+  /** Lanes per direction; defaults to one. */
+  lanes?: number;
+  /** Use separate protected-left phases at four-way intersections. */
+  protectedLeft?: boolean;
   /** A north-south river after column `afterCol`, crossed only on `bridgeRows`. */
   river?: { afterCol: number; width: number; bridgeRows: number[] };
 }
@@ -48,51 +54,34 @@ export function generateGrid(o: GridOptions): MapDef {
     for (let c = 0; c < o.cols - 1; c++) {
       const bridge = !!river && c === river.afterCol;
       if (bridge && !river!.bridgeRows.includes(r)) continue;
-      roads.push({ id: 0, from: idOf(c, r), to: idOf(c + 1, r), speedLimit, bridge });
+      roads.push({ id: 0, from: idOf(c, r), to: idOf(c + 1, r), speedLimit, lanes: o.lanes, bridge });
     }
   }
   for (let c = 0; c < o.cols; c++) {
-    for (let r = 0; r < o.rows - 1; r++) roads.push({ id: 0, from: idOf(c, r), to: idOf(c, r + 1), speedLimit });
+    for (let r = 0; r < o.rows - 1; r++)
+      roads.push({ id: 0, from: idOf(c, r), to: idOf(c, r + 1), speedLimit, lanes: o.lanes });
   }
   if (o.removeRatio) roads = pruneRoads(roads, nodes.length, o.removeRatio, rng);
   roads.forEach((road, i) => (road.id = i));
+  if (o.protectedLeft) {
+    for (const node of nodes) {
+      const degree = roads.filter((r) => r.from === node.id || r.to === node.id).length;
+      if (degree >= 4) node.signalPhases = protectedLeftPhases();
+    }
+  }
 
   const pos = (c: number, r: number): Vec2 => ({ x: nodes[idOf(c, r)].x, y: nodes[idOf(c, r)].y });
-  const decor: MapDecor[] = [];
-  const maxR = Math.max(totalW, totalH) * 0.6;
+  const blocks: Vec2[][] = [];
   for (let r = 0; r < o.rows - 1; r++) {
     for (let c = 0; c < o.cols - 1; c++) {
       if (river && c === river.afterCol) continue;
-      const quad = [pos(c, r), pos(c + 1, r), pos(c + 1, r + 1), pos(c, r + 1)];
-      const block = insetPolygon(quad, ROAD_HALF_WIDTH);
-      decor.push({ type: 'block', polygon: block });
-      const lot = insetPolygon(block, SIDEWALK_WIDTH);
-      if (rng.chance(o.parkChance ?? 0.1)) {
-        decor.push({ type: 'park', polygon: lot });
-        continue;
-      }
-      const mid = lerpVec(quad[0], quad[2], 0.5);
-      const downtown = 1 - Math.min(1, Math.hypot(mid.x, mid.y) / maxR);
-      const nx = rng.int(2, 3);
-      const ny = rng.int(2, 3);
-      for (let i = 0; i < nx; i++) {
-        for (let j = 0; j < ny; j++) {
-          if (rng.chance(0.08)) continue;
-          const sub = [
-            bilinear(lot, i / nx, j / ny),
-            bilinear(lot, (i + 1) / nx, j / ny),
-            bilinear(lot, (i + 1) / nx, (j + 1) / ny),
-            bilinear(lot, i / nx, (j + 1) / ny),
-          ];
-          decor.push({
-            type: 'building',
-            polygon: insetPolygon(sub, 1.2),
-            height: rng.range(5, 12) + downtown * rng.range(4, 28),
-          });
-        }
-      }
+      blocks.push([pos(c, r), pos(c + 1, r), pos(c + 1, r + 1), pos(c, r + 1)]);
     }
   }
+  const decor: MapDecor[] = decorateBlocks(blocks, rng, {
+    parkChance: o.parkChance,
+    maxRadius: Math.max(totalW, totalH) * 0.6,
+  });
 
   if (river) {
     const xl = nodes[idOf(river.afterCol, 0)].x + ROAD_HALF_WIDTH + 2;
@@ -119,10 +108,6 @@ export function generateGrid(o: GridOptions): MapDef {
       maxY: Math.max(...ys) + margin,
     },
   };
-}
-
-function bilinear(q: Vec2[], u: number, v: number): Vec2 {
-  return lerpVec(lerpVec(q[0], q[1], u), lerpVec(q[3], q[2], u), v);
 }
 
 /** Randomly removes roads while keeping every node at degree >= 2 and the graph connected. */

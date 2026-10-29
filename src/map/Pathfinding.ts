@@ -1,5 +1,5 @@
 import { distance } from '../core/math';
-import type { Lane } from './Lane';
+import type { Lane, TrafficClass } from './Lane';
 
 class MinHeap<T> {
   private items: T[] = [];
@@ -54,7 +54,13 @@ class MinHeap<T> {
  * Lane-level A* by travel time. Returns the lanes to drive after `from`,
  * ending with `to`, or null when unreachable.
  */
-export function findRoute(from: Lane, to: Lane, maxSpeed = 14): Lane[] | null {
+export function findRoute(
+  from: Lane,
+  to: Lane,
+  maxSpeed = 14,
+  traffic: TrafficClass = 'all',
+  allowLaneChanges = true,
+): Lane[] | null {
   if (from === to) return null;
   const g = new Map<Lane, number>([[from, 0]]);
   const came = new Map<Lane, Lane>();
@@ -72,7 +78,13 @@ export function findRoute(from: Lane, to: Lane, maxSpeed = 14): Lane[] | null {
       return path.reverse();
     }
     const gc = g.get(cur)!;
-    for (const nx of cur.next) {
+    const edges = [...cur.next];
+    if (allowLaneChanges && cur.kind === 'road') {
+      if (cur.left) edges.push(cur.left);
+      if (cur.right) edges.push(cur.right);
+    }
+    for (const nx of edges) {
+      if (nx.traffic !== 'all' && traffic !== 'all' && nx.traffic !== traffic) continue;
       const ng = gc + nx.length / Math.max(nx.speedLimit, 1);
       if (ng < (g.get(nx) ?? Infinity)) {
         g.set(nx, ng);

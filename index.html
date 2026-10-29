@@ -2,32 +2,54 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#f4efe4" />
     <title>铅笔城 · City Fast Lanes</title>
   </head>
   <body>
     <div id="app"></div>
     <div id="hud">
       <section class="panel" id="panel-controls">
-        <h1>铅笔城 <small>City Fast Lanes</small></h1>
-        <label class="row">地图 <select id="map-select"></select></label>
-        <label class="row">汽车 <input type="range" id="car-count" min="0" max="160" /> <span id="car-count-val"></span></label>
-        <label class="row">自行车 <input type="range" id="bike-count" min="0" max="80" /> <span id="bike-count-val"></span></label>
-        <div class="row">
-          时速
-          <button data-speed="0.5">½×</button>
-          <button data-speed="1" class="active">1×</button>
-          <button data-speed="3">3×</button>
-          <button id="pause-btn">暂停</button>
+        <h1>铅笔城 <small>City Fast Lanes</small><button id="panel-toggle" aria-label="折叠面板">−</button></h1>
+        <div id="panel-body">
+          <label class="row">地图 <select id="map-select"></select></label>
+          <label class="row">汽车 <input type="range" id="car-count" min="0" max="160" /> <span id="car-count-val"></span></label>
+          <label class="row">自行车 <input type="range" id="bike-count" min="0" max="80" /> <span id="bike-count-val"></span></label>
+          <div class="row">时速
+            <button data-speed="0.5">½×</button><button data-speed="1" class="active">1×</button><button data-speed="3">3×</button><button id="pause-btn">暂停</button>
+          </div>
+          <label class="row">画风 <select id="style-select"><option value="pencil">铅笔</option><option value="pen">钢笔淡彩</option><option value="blueprint">蓝图</option><option value="charcoal">炭笔</option></select></label>
+          <label class="row">夜间 <input type="range" id="night-range" min="0" max="1" step="0.05" value="0" /></label>
+          <label class="row"><input type="checkbox" id="sketch-toggle" checked /> 素描渲染</label>
+          <details>
+            <summary>目标与观察工具</summary>
+            <label class="row">目标 <select id="objective-mode"><option value="">自由驾驶</option><option value="delivery">送货</option><option value="pickup">接人</option><option value="timed">限时到达</option></select></label>
+            <label class="row"><input type="checkbox" id="route-toggle" checked /> 路线箭头</label>
+            <label class="row"><input type="checkbox" id="heat-toggle" /> 拥堵热力图</label>
+            <label class="row">绿灯 <input type="range" id="signal-scale" min="0.5" max="2" step="0.25" value="1" /> <span id="signal-scale-val">1×</span></label>
+          </details>
+          <details>
+            <summary>地图工具</summary>
+            <div class="row wrap"><button id="map-export">导出 JSON</button><button id="map-import">导入 JSON</button><button id="map-edit">编辑道路</button><button id="map-share">分享链接</button></div>
+            <input id="map-file" type="file" accept="application/json,.json" hidden />
+          </details>
+          <details>
+            <summary>驾驶回放</summary>
+            <div class="row wrap"><button id="replay-record">开始记录</button><button id="replay-play">导入并回放</button><button id="replay-export">导出回放</button></div>
+            <input id="replay-file" type="file" accept="application/json,.json" hidden />
+          </details>
         </div>
-        <label class="row"><input type="checkbox" id="sketch-toggle" checked /> 素描渲染</label>
       </section>
       <section class="panel" id="status"></section>
+      <div id="toast" role="status"></div>
       <section class="panel" id="help">
         <b>点击</b>选车 · <b>双击 / Enter</b>接管 · <b>Esc</b>交还 AI · <b>Tab</b>换车 · <b>V</b>切视角<br />
-        <b>WASD / 方向键</b>驾驶（观察时平移）· <b>空格</b>手刹 · <b>拖拽</b>平移 · <b>滚轮</b>缩放 · <b>Q/E</b>旋转 ·
-        <b>P</b>暂停 · <b>1/2/3</b>时速
+        <b>WASD / 方向键</b>驾驶（观察时平移）· <b>空格</b>手刹 · <b>拖拽</b>平移 · <b>滚轮 / 双指</b>缩放 · <b>Q/E</b>旋转 · <b>P</b>暂停
       </section>
+      <div id="touch-controls">
+        <div id="touch-joystick" aria-label="虚拟摇杆"><div id="touch-knob"></div></div>
+        <div id="touch-actions"><button id="touch-view">视角</button><button id="touch-drive">接管</button><button id="touch-brake">手刹</button></div>
+      </div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
