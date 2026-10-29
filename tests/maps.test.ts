@@ -250,6 +250,23 @@ describe('road approach markings', () => {
     expect(crossingDistances.length).toBeGreaterThan(0);
     for (const crossingDistance of crossingDistances) expect(stopDistance).toBeGreaterThan(crossingDistance);
   });
+
+  it('creates one signal head per road approach instead of one per lane', () => {
+    const def = twoNodeMap();
+    def.nodes.push({ id: 2, x: 100, y: 100 }, { id: 3, x: 100, y: -100 });
+    def.roads.push(
+      { id: 5, from: 1, to: 2, speedLimit: 14 },
+      { id: 6, from: 1, to: 3, speedLimit: 14 },
+    );
+    const net = new RoadNetwork(def);
+    const signalLanes = net.roadLanes.filter((lane) => lane.signal);
+    const approaches = new Set(signalLanes.map((lane) => `${lane.nodeId}:${lane.roadId}`));
+    expect(signalLanes.length).toBeGreaterThan(approaches.size);
+
+    const scene = buildScene(net);
+    expect(scene.lamps).toHaveLength(approaches.size);
+    scene.dispose();
+  });
 });
 
 describe('MapJson', () => {

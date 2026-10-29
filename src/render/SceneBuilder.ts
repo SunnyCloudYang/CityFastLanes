@@ -8,6 +8,7 @@ import {
   roadHalfWidth as getRoadHalfWidth,
   STOP_LINE_DISTANCE,
 } from '../map/constants';
+import type { Lane } from '../map/Lane';
 import type { RoadNetwork } from '../map/RoadNetwork';
 import type { LightState, SignalController } from '../map/Signals';
 
@@ -210,13 +211,21 @@ export function buildScene(net: RoadNetwork): BuiltScene {
   trunks.castShadow = crowns.castShadow = true;
   root.add(trunks, crowns);
 
-  // Signal heads on the kerb at each stop line.
+  // One signal head per road approach, placed beside its outermost lane.
+  const signalApproaches = new Map<string, Lane>();
+  for (const lane of net.roadLanes) {
+    if (!lane.signal) continue;
+    const key = `${lane.nodeId}:${lane.roadId}`;
+    const current = signalApproaches.get(key);
+    if (!current || lane.laneIndex > current.laneIndex) signalApproaches.set(key, lane);
+  }
   const lamps: SignalLamp[] = [];
   const poleGeo = new THREE.CylinderGeometry(0.08, 0.08, 3.6, 6);
   const headGeo = new THREE.BoxGeometry(0.4, 0.9, 0.4);
   const lampGeo = new THREE.SphereGeometry(0.45, 10, 8);
-  for (const lane of net.roadLanes) {
-    if (!lane.signal) continue;
+  for (const lane of signalApproaches.values()) {
+    const signal = lane.signal;
+    if (!signal) continue;
     const { t } = lane.pointAt(lane.length);
     const p = add(sub(lane.end, scale(t, STOP_LINE_DISTANCE + 0.2)), scale(rightOf(t), LANE_WIDTH / 2 + 1.4));
     const pole = new THREE.Mesh(poleGeo, mats.pole);
@@ -228,7 +237,7 @@ export function buildScene(net: RoadNetwork): BuiltScene {
     lamp.position.set(p.x, 4.4, p.y);
     pole.castShadow = head.castShadow = true;
     root.add(pole, head, lamp);
-    lamps.push({ mesh: lamp, ctrl: lane.signal.ctrl, group: lane.signal.group });
+    lamps.push({ mesh: lamp, ctrl: signal.ctrl, group: signal.group });
   }
 
   return {
