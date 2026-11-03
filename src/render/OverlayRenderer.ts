@@ -9,6 +9,14 @@ export class OverlayRenderer {
   showHeatmap = false;
   showRoutes = true;
   private readonly routeGroup = new THREE.Group();
+  private readonly lineMaterial = new THREE.LineDashedMaterial({
+    color: 0xe0433a,
+    dashSize: 2,
+    gapSize: 1.2,
+    transparent: true,
+    opacity: 0.85,
+  });
+  private readonly arrowMaterial = new THREE.MeshBasicMaterial({ color: 0xe0433a });
   private readonly heat: THREE.InstancedMesh;
   private readonly destinationMarker: THREE.Mesh;
   private destination: Vec2 | null = null;
@@ -45,18 +53,12 @@ export class OverlayRenderer {
       }
     }
     if (points.length < 2) return;
-    const line = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints(points),
-      new THREE.LineDashedMaterial({ color: 0xe0433a, dashSize: 2, gapSize: 1.2, transparent: true, opacity: 0.85 }),
-    );
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points), this.lineMaterial);
     line.computeLineDistances();
     this.routeGroup.add(line);
     for (let i = 4; i < points.length - 1; i += 8) {
       const direction = points[i + 1].clone().sub(points[i]).normalize();
-      const arrow = new THREE.Mesh(
-        new THREE.ConeGeometry(0.75, 2.3, 3),
-        new THREE.MeshBasicMaterial({ color: 0xe0433a }),
-      );
+      const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.75, 2.3, 3), this.arrowMaterial);
       arrow.position.copy(points[i]);
       arrow.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction);
       this.routeGroup.add(arrow);

@@ -1,14 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { angleOf, distance } from '../src/core/math';
+import { distance } from '../src/core/math';
 import type { Lane } from '../src/map/Lane';
-import type { MapDef } from '../src/map/types';
 import { Pedestrian } from '../src/sim/Pedestrian';
 import { PEDESTRIAN_SNAPSHOT_STRIDE } from '../src/sim/protocol';
-import { Vehicle } from '../src/sim/Vehicle';
 import { World } from '../src/sim/World';
+import { addVehicle, makeMap } from './helpers';
 
-function twoNodeMap(): MapDef {
-  return {
+function twoNodeMap() {
+  return makeMap({
     id: 'pedestrian-test',
     name: 'Pedestrian test',
     seed: 11,
@@ -17,9 +16,8 @@ function twoNodeMap(): MapDef {
       { id: 1, x: 100, y: 0 },
     ],
     roads: [{ id: 7, from: 0, to: 1, speedLimit: 14 }],
-    decor: [],
     bounds: { minX: -20, minY: -20, maxX: 120, maxY: 20 },
-  };
+  });
 }
 
 function approach(world: World): Lane {
@@ -30,16 +28,8 @@ function approach(world: World): Lane {
   return lane;
 }
 
-function addVehicle(world: World, lane: Lane, frontDistance: number, speed: number): Vehicle {
-  const s = lane.length - frontDistance - 2.15;
-  const { p, t } = lane.pointAt(s);
-  const vehicle = new Vehicle('car', { ...p }, angleOf(t), 0xffffff, 1);
-  vehicle.lane = lane;
-  vehicle.s = s;
-  vehicle.speed = speed;
-  world.vehicles.push(vehicle);
-  world.targetMotor = Math.max(world.targetMotor, world.count(false));
-  return vehicle;
+function addApproachVehicle(world: World, lane: Lane, frontDistance: number, speed: number) {
+  return addVehicle(world, lane, { s: lane.length - frontDistance - 2.15, speed, trackLane: true });
 }
 
 function addCrossing(world: World, state: 'waiting' | 'crossing'): Pedestrian {
@@ -90,7 +80,7 @@ describe('M3 pedestrians', () => {
   it('waits for an approaching vehicle before committing to a crosswalk', () => {
     const world = new World(twoNodeMap(), 0, 0);
     const pedestrian = addCrossing(world, 'waiting');
-    addVehicle(world, approach(world), 5, 8);
+    addApproachVehicle(world, approach(world), 5, 8);
     world.step(1 / 60);
     expect(pedestrian.state).toBe('waiting');
     expect(pedestrian.crossingProgress).toBe(0);
@@ -101,7 +91,7 @@ describe('M3 pedestrians', () => {
     const world = new World(twoNodeMap(), 0, 0);
     const pedestrian = addCrossing(world, 'crossing');
     const lane = approach(world);
-    const vehicle = addVehicle(world, lane, 25, 10);
+    const vehicle = addApproachVehicle(world, lane, 25, 10);
 
     for (let i = 0; i < 360; i++) world.step(1 / 60);
     expect(pedestrian.state).toBe('crossing');

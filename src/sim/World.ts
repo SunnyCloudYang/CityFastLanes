@@ -78,6 +78,7 @@ export class World {
   private readonly laneIndex = new SpatialHash<Lane>(32);
   private readonly buildingIndex = new SpatialHash<Building>(32);
   private readonly vehicleIndex = new SpatialHash<Vehicle>(16);
+  private nextVehicleId = 1;
 
   constructor(
     readonly def: MapDef,
@@ -883,7 +884,8 @@ export class World {
     for (const q of players) if (distance(q.pos, pos) < 25) return false;
     const colors = kind === 'bike' ? BIKE_COLORS : MOTOR_COLORS;
     const color = kind === 'taxi' ? 0xf0b429 : this.rng.pick(colors);
-    const v = new Vehicle(kind, pos, angleOf(t), color, this.rng.range(0.85, 1.1));
+    // Ids are world-scoped so replays can address the recorded vehicle across sessions.
+    const v = new Vehicle(kind, pos, angleOf(t), color, this.rng.range(0.85, 1.1), this.nextVehicleId++);
     // Lane spacing alone misses crossing lanes and reserved approaches at junctions.
     if (lane.next.some((connector) => connector.holders.size > 0)) return false;
     for (const u of this.vehicles) {

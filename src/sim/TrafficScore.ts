@@ -1,5 +1,5 @@
 import { clamp, cross, dot, type Vec2 } from '../core/math';
-import type { Lane } from '../map/Lane';
+import { nearestRoadLane } from './NearestLane';
 import type { Vehicle } from './Vehicle';
 import type { World } from './World';
 
@@ -65,7 +65,7 @@ export class TrafficScore {
   private currentScore = 100;
   private safeTime = 0;
   private streak = 0;
-  private elapsed = 0;
+  private elapsedSeconds = 0;
   private collisionNotified = false;
 
   constructor(options: TrafficScoreOptions = {}) {
@@ -97,6 +97,11 @@ export class TrafficScore {
     return this.streak;
   }
 
+  /** Seconds accumulated by this score instance. */
+  get elapsed(): number {
+    return this.elapsedSeconds;
+  }
+
   get events(): TrafficEvent[] {
     return this.eventList.map((event) => ({ ...event }));
   }
@@ -114,7 +119,7 @@ export class TrafficScore {
     }
     if (!Number.isFinite(dt) || dt <= 0) return this.snapshot();
 
-    this.elapsed += dt;
+    this.elapsedSeconds += dt;
     for (const type of VIOLATIONS) this.cooldown[type] = Math.max(0, this.cooldown[type] - dt);
 
     const previous = this.previous ?? { ...vehicle.prevPos };
@@ -166,7 +171,7 @@ export class TrafficScore {
     this.currentScore = 100;
     this.safeTime = 0;
     this.streak = 0;
-    this.elapsed = 0;
+    this.elapsedSeconds = 0;
     this.collisionNotified = false;
     for (const type of VIOLATIONS) this.cooldown[type] = 0;
   }
@@ -180,7 +185,7 @@ export class TrafficScore {
       type,
       penalty: this.penalties[type],
       score: this.currentScore,
-      time: this.elapsed,
+      time: this.elapsedSeconds,
     });
     if (this.eventList.length > this.maxEvents) this.eventList.splice(0, this.eventList.length - this.maxEvents);
     return true;
@@ -217,30 +222,6 @@ export class TrafficScore {
     const forwardSpeed = vehicle.speed * dot(heading, nearest.lane.pointAt(nearest.s).t);
     return forwardSpeed < -this.wrongWaySpeed;
   }
-}
-
-interface NearestLane {
-  lane: Lane;
-  s: number;
-  distance: number;
-}
-
-function nearestRoadLane(lanes: readonly Lane[], position: Vec2): NearestLane | null {
-  let best: NearestLane | null = null;
-  let bestDistanceSquared = Infinity;
-  for (const lane of lanes) {
-    if (lane.length <= 0) continue;
-    const s = lane.project(position);
-    const point = lane.pointAt(s).p;
-    const dx = point.x - position.x;
-    const dy = point.y - position.y;
-    const distanceSquared = dx * dx + dy * dy;
-    if (distanceSquared < bestDistanceSquared) {
-      bestDistanceSquared = distanceSquared;
-      best = { lane, s, distance: Math.sqrt(distanceSquared) };
-    }
-  }
-  return best;
 }
 
 function signedDistance(point: Vec2, origin: Vec2, direction: Vec2): number {

@@ -16,12 +16,15 @@ export interface SignalLamp {
   mesh: THREE.Mesh;
   ctrl: SignalController;
   group: number;
+  /** Left-turn arrow board; null when the approach has no protected left phase. */
+  arrow: THREE.Mesh | null;
 }
 
 export interface BuiltScene {
   root: THREE.Group;
   lamps: SignalLamp[];
   lampMaterials: Record<LightState, THREE.Material>;
+  arrowMaterials: Record<LightState, THREE.Material>;
   dispose(): void;
 }
 
@@ -61,6 +64,29 @@ function quadPoint(q: Vec2[], u: number, v: number): Vec2 {
   return lerpVec(lerpVec(q[0], q[1], u), lerpVec(q[3], q[2], u), v);
 }
 
+/**
+ * Left-turn arrow in lamp-local coordinates (x right, y up). The board faces
+ * oncoming traffic with local +x on the driver's right, so the head bends
+ * toward local -x, the driver's left.
+ */
+function leftArrowGeometry(): THREE.ShapeGeometry {
+  const outline = [
+    [0.07, -0.4],
+    [0.07, 0.34],
+    [-0.45, 0.34],
+    [-0.45, 0.46],
+    [-0.78, 0.27],
+    [-0.45, 0.08],
+    [-0.45, 0.2],
+    [-0.07, 0.2],
+    [-0.07, -0.4],
+  ];
+  const shape = new THREE.Shape(outline.map(([x, y]) => new THREE.Vector2(x, y)));
+  const geometry = new THREE.ShapeGeometry(shape);
+  geometry.translate(0.14, 0.02, 0);
+  return geometry;
+}
+
 export function buildScene(net: RoadNetwork): BuiltScene {
   const def = net.def;
   const rng = new Random(def.seed + 101);
@@ -83,6 +109,12 @@ export function buildScene(net: RoadNetwork): BuiltScene {
     green: new THREE.MeshBasicMaterial({ color: 0x3fbf5f }),
     yellow: new THREE.MeshBasicMaterial({ color: 0xf2c230 }),
     red: new THREE.MeshBasicMaterial({ color: 0xe0433a }),
+  };
+  // Boards are flat shapes seen from both sides of the pole, hence DoubleSide.
+  const arrowMaterials: Record<LightState, THREE.Material> = {
+    green: new THREE.MeshBasicMaterial({ color: 0x3fbf5f, side: THREE.DoubleSide }),
+    yellow: new THREE.MeshBasicMaterial({ color: 0xf2c230, side: THREE.DoubleSide }),
+    red: new THREE.MeshBasicMaterial({ color: 0xe0433a, side: THREE.DoubleSide }),
   };
 
   const b = def.bounds;
@@ -145,10 +177,12 @@ export function buildScene(net: RoadNetwork): BuiltScene {
     const { t } = lane.pointAt(lane.length);
     dashMatrices.push(placeFlat(sub(lane.end, scale(t, STOP_LINE_DISTANCE)), angleOf(t), 0.45, LANE_WIDTH - 0.3, Y.marking));
   }
-  const crosswalkRoads = new Set<number>();
+  const crosswalkApproaches = new Set<string>();
   for (const lane of net.roadLanes) {
-    if (crosswalkRoads.has(lane.roadId) || !lane.signal) continue;
-    crosswalkRoads.add(lane.roadId);
+    if (!lane.signal) continue;
+    const approach = `${lane.nodeId}:${lane.roadId}`;
+    if (crosswalkApproaches.has(approach)) continue;
+    crosswalkApproaches.add(approach);
     const road = def.roads.find((item) => item.id === lane.roadId)!;
     const t = lane.pointAt(lane.length).t;
     const width = (road.lanes ?? 1) * LANE_WIDTH * (road.oneWay ? 1 : 2);
@@ -223,6 +257,7 @@ export function buildScene(net: RoadNetwork): BuiltScene {
   const poleGeo = new THREE.CylinderGeometry(0.08, 0.08, 3.6, 6);
   const headGeo = new THREE.BoxGeometry(0.4, 0.9, 0.4);
   const lampGeo = new THREE.SphereGeometry(0.45, 10, 8);
+  const arrowGeo = leftArrowGeometry();
   for (const lane of signalApproaches.values()) {
     const signal = lane.signal;
     if (!signal) continue;
@@ -237,19 +272,35 @@ export function buildScene(net: RoadNetwork): BuiltScene {
     lamp.position.set(p.x, 4.4, p.y);
     pole.castShadow = head.castShadow = true;
     root.add(pole, head, lamp);
-    lamps.push({ mesh: lamp, ctrl: signal.ctrl, group: signal.group });
+    let arrow: THREE.Mesh | null = null;
+    if (signal.ctrl.protectedLeft(signal.group)) {
+      const offset = add(p, scale(rightOf(t), 1.15));
+      arrow = new THREE.Mesh(arrowGeo, arrowMaterials.red);
+      arrow.position.set(offset.x, 4.4, offset.y);
+      // Board normal faces oncoming traffic; local +x is the driver's right.
+      const basis = new THREE.Matrix4().makeBasis(
+        new THREE.Vector3(-t.y, 0, t.x),
+        new THREE.Vector3(0, 1, 0),
+        new THREE.Vector3(-t.x, 0, -t.y),
+      );
+      arrow.quaternion.setFromRotationMatrix(basis);
+      root.add(arrow);
+    }
+    lamps.push({ mesh: lamp, ctrl: signal.ctrl, group: signal.group, arrow });
   }
 
   return {
     root,
     lamps,
     lampMaterials,
+    arrowMaterials,
     dispose() {
       root.traverse((o) => {
         if (o instanceof THREE.Mesh) o.geometry.dispose();
       });
       for (const m of Object.values(mats)) m.dispose();
       for (const m of Object.values(lampMaterials)) m.dispose();
+      for (const m of Object.values(arrowMaterials)) m.dispose();
     },
   };
 }

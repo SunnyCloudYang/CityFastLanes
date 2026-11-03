@@ -1,45 +1,32 @@
 import { describe, expect, it } from 'vitest';
-import { angleOf } from '../src/core/math';
 import type { Lane } from '../src/map/Lane';
-import type { MapDef } from '../src/map/types';
 import { Objectives } from '../src/sim/Objectives';
 import { Replay, REPLAY_FORMAT_VERSION, type ReplayData, type ReplayInput } from '../src/sim/Replay';
 import { TrafficScore } from '../src/sim/TrafficScore';
-import { Vehicle } from '../src/sim/Vehicle';
 import { World } from '../src/sim/World';
-
-function testMap(): MapDef {
-  return {
-    id: 'gameplay-test',
-    name: 'Gameplay test',
-    seed: 5,
-    nodes: [
-      { id: 0, x: 0, y: 0 },
-      { id: 1, x: -100, y: 0 },
-      { id: 2, x: 100, y: 0 },
-      { id: 3, x: 0, y: -100 },
-    ],
-    roads: [
-      { id: 0, from: 1, to: 0, speedLimit: 12 },
-      { id: 1, from: 0, to: 2, speedLimit: 12 },
-      { id: 2, from: 3, to: 0, speedLimit: 12 },
-    ],
-    decor: [],
-    bounds: { minX: -110, minY: -110, maxX: 110, maxY: 20 },
-  };
-}
+import { addVehicle, makeMap } from './helpers';
 
 function makeWorld(): World {
-  return new World(testMap(), 0, 0);
-}
-
-function addVehicle(world: World, lane: Lane, s: number, direction = 1): Vehicle {
-  const { p, t } = lane.pointAt(s);
-  const heading = angleOf(t) + (direction < 0 ? Math.PI : 0);
-  const vehicle = new Vehicle('car', { ...p }, heading, 0xffffff, 1);
-  vehicle.speed = 5;
-  world.vehicles.push(vehicle);
-  return vehicle;
+  return new World(
+    makeMap({
+      id: 'gameplay-test',
+      name: 'Gameplay test',
+      nodes: [
+        { id: 0, x: 0, y: 0 },
+        { id: 1, x: -100, y: 0 },
+        { id: 2, x: 100, y: 0 },
+        { id: 3, x: 0, y: -100 },
+      ],
+      roads: [
+        { id: 0, from: 1, to: 0, speedLimit: 12 },
+        { id: 1, from: 0, to: 2, speedLimit: 12 },
+        { id: 2, from: 3, to: 0, speedLimit: 12 },
+      ],
+      bounds: { minX: -110, minY: -110, maxX: 110, maxY: 20 },
+    }),
+    0,
+    0,
+  );
 }
 
 function northApproach(world: World): Lane {
@@ -55,7 +42,7 @@ describe('TrafficScore', () => {
     const world = makeWorld();
     const lane = northApproach(world);
     expect(lane.signal?.ctrl.state(lane.signal.group)).toBe('red');
-    const vehicle = addVehicle(world, lane, lane.length - 2);
+    const vehicle = addVehicle(world, lane, { s: lane.length - 2 });
     vehicle.pos.x = lane.pointAt(lane.length + 1).p.x;
     vehicle.pos.y = lane.pointAt(lane.length + 1).p.y;
 
@@ -72,7 +59,7 @@ describe('TrafficScore', () => {
   it('rate-limits wrong-way penalties and does not count active violations as safe time', () => {
     const world = makeWorld();
     const lane = world.net.roadLanes[0];
-    const vehicle = addVehicle(world, lane, lane.length / 2, -1);
+    const vehicle = addVehicle(world, lane, { s: lane.length / 2, direction: -1 });
     const score = new TrafficScore({ cooldowns: { wrongWay: 1 } });
 
     expect(score.step(world, vehicle, 0.1).score).toBe(90);
@@ -86,7 +73,7 @@ describe('TrafficScore', () => {
   it('rate-limits collision notifications and accumulates safe driving time', () => {
     const world = makeWorld();
     const lane = world.net.roadLanes[0];
-    const vehicle = addVehicle(world, lane, lane.length / 2);
+    const vehicle = addVehicle(world, lane, { s: lane.length / 2 });
     const score = new TrafficScore();
 
     expect(score.penalizeCollision()).toBe(true);
@@ -109,7 +96,7 @@ describe('Objectives', () => {
   it('creates reachable delivery/pickup routes and completes sequentially by proximity', () => {
     const world = makeWorld();
     const startLane = world.net.roadLanes[0];
-    const vehicle = addVehicle(world, startLane, startLane.length * 0.25);
+    const vehicle = addVehicle(world, startLane, { s: startLane.length * 0.25 });
 
     for (const mode of ['delivery', 'pickup'] as const) {
       vehicle.pos.x = startLane.pointAt(startLane.length * 0.25).p.x;
@@ -139,7 +126,7 @@ describe('Objectives', () => {
   it('updates timed remaining time and expires only once', () => {
     const world = makeWorld();
     const lane = world.net.roadLanes[0];
-    const vehicle = addVehicle(world, lane, lane.length / 2);
+    const vehicle = addVehicle(world, lane, { s: lane.length / 2 });
     const objectives = new Objectives({ seed: 2, minDistance: 20, timeLimit: 1 });
 
     expect(objectives.start(world, vehicle, 'timed')?.remainingTime).toBe(1);
@@ -221,5 +208,21 @@ describe('Replay', () => {
     recorder.startRecording();
     recorder.record(INPUT_A);
     expect(() => recorder.record(INPUT_B)).toThrow(/frame limit/);
+  });
+
+  it('captures the driven vehicle id and round-trips it', () => {
+    const recorder = new Replay(REPLAY_CONFIG);
+    recorder.startRecording();
+    expect(recorder.record(INPUT_A, 57)).toBe(true);
+    const json = recorder.exportJSON();
+    expect(JSON.parse(json).vehicleId).toBe(57);
+    expect(Replay.importJSON(json).toData().vehicleId).toBe(57);
+
+    expect(() => recorder.record(INPUT_B, -1)).toThrow(/vehicleId/);
+    const bad = JSON.stringify({ ...replayData(), vehicleId: 1.5 });
+    expect(() => Replay.importJSON(bad)).toThrow(/vehicleId/);
+
+    const legacy = JSON.stringify({ ...replayData() });
+    expect(Replay.importJSON(legacy).toData().vehicleId).toBeNull();
   });
 });

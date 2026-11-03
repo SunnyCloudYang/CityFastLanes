@@ -22,11 +22,22 @@ export class MapEditor {
       .filter((item) => item.distance < 8)
       .sort((a, b) => a.distance - b.distance)[0]?.node;
     if (!near) {
-      if (this.pendingNode !== null) return null;
       const id = Math.max(-1, ...def.nodes.map((node) => node.id)) + 1;
       def.nodes.push({ id, x: Math.round(point.x), y: Math.round(point.y) });
       def.decor = [];
       this.expandBounds(def, point);
+      if (this.pendingNode !== null) {
+        const from = this.pendingNode;
+        def.roads.push({
+          id: Math.max(-1, ...def.roads.map((road) => road.id)) + 1,
+          from,
+          to: id,
+          speedLimit: 13.9,
+          lanes: 1,
+        });
+        this.pendingNode = null;
+        return { def, message: `已连接 ${from} → ${id}` };
+      }
       this.pendingNode = id;
       return { def, message: `已放置节点 ${id}；点击另一节点或空白处连路` };
     }

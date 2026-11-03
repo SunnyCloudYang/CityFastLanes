@@ -70,6 +70,15 @@ export class SignalController {
     }
     return 'red';
   }
+
+  /** True when left turns get their own phase, so the group needs a turn arrow lamp. */
+  protectedLeft(group: number): boolean {
+    const serving = this.phases.filter((phase) => phase.groups.includes(group));
+    return (
+      serving.some((phase) => phase.turns.includes('straight') && !phase.turns.includes('left')) &&
+      serving.some((phase) => phase.turns.includes('left'))
+    );
+  }
 }
 
 /** Four-phase sequence: through/right traffic and protected lefts for each axis. */

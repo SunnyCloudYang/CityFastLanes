@@ -24,6 +24,8 @@ export interface ReplayConfig {
   };
   /** Fixed simulation step in seconds. */
   dt: number;
+  /** Vehicle the inputs belong to; null for replays recorded before this field existed. */
+  vehicleId?: number | null;
 }
 
 export interface ReplayData extends ReplayConfig {
@@ -61,6 +63,7 @@ export class Replay {
         mapId: data.mapId,
         initialVehicles: data.initialVehicles,
         dt: data.dt,
+        vehicleId: data.vehicleId,
       },
       options,
     );
@@ -95,13 +98,19 @@ export class Replay {
   }
 
   /** Records a defensive, clamped input sample. Returns false unless recording. */
-  record(input: ReplayInput): boolean {
+  record(input: ReplayInput, vehicleId?: number | null): boolean {
     if (this.currentMode !== 'recording') return false;
     if (this.frames.length >= this.maxFrames) {
       throw new RangeError(`Replay exceeds the ${this.maxFrames}-frame limit`);
     }
     if (!Number.isFinite(input.throttle) || !Number.isFinite(input.steer)) {
       throw new TypeError('Replay input throttle and steer must be finite numbers');
+    }
+    if (vehicleId !== undefined && vehicleId !== null) {
+      if (!Number.isSafeInteger(vehicleId) || vehicleId < 0) {
+        throw new TypeError('Replay vehicleId must be a non-negative safe integer');
+      }
+      this.config = { ...this.config, vehicleId };
     }
     this.frames.push({
       throttle: clamp(input.throttle, -1, 1),
@@ -190,6 +199,7 @@ function validateReplay(value: unknown, maxFrames: number): ReplayData {
       bikes: (value.initialVehicles as { bikes: number }).bikes,
     },
     dt: value.dt as number,
+    vehicleId: (value.vehicleId as number | null | undefined) ?? null,
     frames,
   };
 }
@@ -216,6 +226,11 @@ function validateHeader(value: Record<string, unknown>): void {
       throw new RangeError(`Invalid replay: initialVehicles.${key} is outside the supported range`);
     }
   }
+  if (value.vehicleId !== undefined && value.vehicleId !== null) {
+    if (!Number.isSafeInteger(value.vehicleId) || (value.vehicleId as number) < 0) {
+      throw new TypeError('Invalid replay: vehicleId must be a non-negative safe integer');
+    }
+  }
 }
 
 function copyConfig(config: ReplayConfig): ReplayConfig {
@@ -224,6 +239,7 @@ function copyConfig(config: ReplayConfig): ReplayConfig {
     mapId: config.mapId,
     initialVehicles: { ...config.initialVehicles },
     dt: config.dt,
+    vehicleId: config.vehicleId ?? null,
   };
 }
 

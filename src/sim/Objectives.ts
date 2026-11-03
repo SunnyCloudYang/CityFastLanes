@@ -2,6 +2,7 @@ import { distance, type Vec2 } from '../core/math';
 import { Random } from '../core/Random';
 import type { Lane } from '../map/Lane';
 import { findRoute } from '../map/Pathfinding';
+import { nearestRoadLane } from './NearestLane';
 import type { Vehicle } from './Vehicle';
 import type { World } from './World';
 
@@ -167,30 +168,6 @@ export class Objectives {
     const estimatedSpeed = Math.max(2, vehicle.spec.desiredSpeed * 0.6);
     return Math.max(20, Math.max(0, routeLength) / estimatedSpeed + 15);
   }
-}
-
-interface NearestLane {
-  lane: Lane;
-  s: number;
-  distance: number;
-}
-
-function nearestRoadLane(lanes: readonly Lane[], position: Vec2): NearestLane | null {
-  let best: NearestLane | null = null;
-  let bestDistanceSquared = Infinity;
-  for (const lane of lanes) {
-    if (lane.length <= 0) continue;
-    const s = lane.project(position);
-    const point = lane.pointAt(s).p;
-    const dx = point.x - position.x;
-    const dy = point.y - position.y;
-    const distanceSquared = dx * dx + dy * dy;
-    if (distanceSquared < bestDistanceSquared) {
-      bestDistanceSquared = distanceSquared;
-      best = { lane, s, distance: Math.sqrt(distanceSquared) };
-    }
-  }
-  return best;
 }
 
 function copyObjective(objective: ObjectiveSnapshot | null): ObjectiveSnapshot | null {

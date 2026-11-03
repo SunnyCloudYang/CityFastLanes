@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import type { Vec2 } from '../src/core/math';
 import { findRoute } from '../src/map/Pathfinding';
 import { MAPS } from '../src/map/maps';
 import { RoadNetwork } from '../src/map/RoadNetwork';
@@ -7,6 +6,7 @@ import { idm } from '../src/sim/ai/IDM';
 import { satMTV } from '../src/sim/Collision';
 import type { Vehicle } from '../src/sim/Vehicle';
 import { World } from '../src/sim/World';
+import { pointInPolygon } from './helpers';
 
 const P = { a: 1.5, b: 2, T: 1.3, s0: 2 };
 
@@ -31,18 +31,6 @@ function motorOverlaps(w: World): number {
     }
   }
   return n;
-}
-
-function pointInPolygon(point: Vec2, polygon: Vec2[]): boolean {
-  let inside = false;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const a = polygon[i];
-    const b = polygon[j];
-    if ((a.y > point.y) !== (b.y > point.y) && point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x) {
-      inside = !inside;
-    }
-  }
-  return inside;
 }
 
 function sidewalkEntries(w: World): number {

@@ -4,6 +4,7 @@ import { TouchControls } from './control/TouchControls';
 import { loadSettings, saveSettings, type Settings } from './core/Settings';
 import { MAPS } from './map/maps';
 import { parseMap, serializeMap } from './map/MapJson';
+import type { Lane } from './map/Lane';
 import type { MapDef } from './map/types';
 import { CameraRig, VIEW_NAMES, type ViewMode } from './render/CameraRig';
 import { OverlayRenderer } from './render/OverlayRenderer';
@@ -56,6 +57,7 @@ class Game {
   private clock = 0;
   private statusTimer = 0;
   private simWorker: Worker | null = null;
+  private pendingSnapshot: SimulationSnapshot | null = null;
   private lastStepSent = 0;
   private frameMs = 16.7;
   private simMs = 0;
@@ -139,6 +141,7 @@ class Game {
     const entry = MAPS.find((m) => m.id === id);
     const def = supplied ?? entry?.build() ?? this.customMaps.get(id) ?? MAPS[0].build();
     this.mapId = def.id;
+    this.pendingSnapshot = null;
     if (this.built) {
       this.scene.remove(this.built.root);
       this.built.dispose();
@@ -185,7 +188,9 @@ class Game {
     const worker = new Worker(new URL('./sim/worker.ts', import.meta.url), { type: 'module' });
     this.simWorker = worker;
     worker.onmessage = (event: MessageEvent<SimulationSnapshot>) => {
-      this.applySnapshot(event.data);
+      // Only the latest snapshot matters for rendering; coalesce bursts of
+      // per-step messages instead of rebuilding state for each one.
+      this.pendingSnapshot = event.data;
       if (this.lastStepSent) this.simMs = this.simMs * 0.85 + (performance.now() - this.lastStepSent) * 0.15;
     };
     worker.onerror = () => {
@@ -253,8 +258,8 @@ class Game {
       if (objective && objective.id !== this.objectiveRouteId) {
         this.objectiveRouteId = objective.id;
         this.overlay.setDestination(objective.destination);
-        this.overlay.setRoute(objective.route);
-        this.lastRouteKey = `objective-${objective.id}`;
+        this.lastRouteKey = `objective-${objective.id}:${this.overlay.showRoutes}`;
+        this.overlay.setRoute(this.overlay.showRoutes ? objective.route : []);
       }
       if (objective?.status === 'completed') {
         this.hud.toast(`目标完成！已完成 ${this.objectives.completedCount} 个`);
@@ -328,12 +333,20 @@ class Game {
   }
 
   private refreshRoute(force = false): void {
-    if (this.controlling && this.objectives.current) return;
-    const route = this.selected ? [this.selected.lane, ...this.selected.route].filter((lane) => lane !== null) : [];
-    const key = `${this.selectedId}:${route.map((lane) => lane!.id).join(',')}`;
+    const objective = this.objectives.current;
+    let route: readonly Lane[];
+    let key: string;
+    if (this.controlling && objective) {
+      route = this.overlay.showRoutes ? objective.route : [];
+      key = `objective-${objective.id}:${this.overlay.showRoutes}`;
+    } else {
+      const lanes = this.selected ? [this.selected.lane, ...this.selected.route].filter((lane) => lane !== null) : [];
+      route = lanes as NonNullable<Vehicle['lane']>[];
+      key = `${this.selectedId}:${lanes.map((lane) => lane!.id).join(',')}:${this.overlay.showRoutes}`;
+    }
     if (force || key !== this.lastRouteKey) {
       this.lastRouteKey = key;
-      this.overlay.setRoute(route as NonNullable<Vehicle['lane']>[]);
+      this.overlay.setRoute(route);
     }
   }
 
@@ -462,6 +475,10 @@ class Game {
     const real = Math.min(0.1, raw / 1000);
     this.frameMs = this.frameMs * 0.9 + raw * 0.1;
     this.last = now; this.clock += real;
+    if (this.pendingSnapshot) {
+      this.applySnapshot(this.pendingSnapshot);
+      this.pendingSnapshot = null;
+    }
     if (this.controlling && !this.selected) this.controlling = false;
     if (this.selectedId !== null && !this.selected) this.select(null);
     this.applyInput(real);
@@ -471,7 +488,16 @@ class Game {
       const simStart = performance.now();
       while (this.acc >= DT && n < MAX_STEPS) {
         const recorded = this.controlling && this.selected ? { ...this.selected.input } : { throttle: 0, steer: 0, handbrake: false };
-        if (this.replay?.isRecording) this.replay.record(recorded);
+        if (this.replay?.isRecording) {
+          const vehicleId = this.controlling && this.selected ? this.selected.id : undefined;
+          try {
+            this.replay.record(recorded, vehicleId);
+          } catch {
+            this.replay.finish();
+            this.hud.setRecording(false);
+            this.hud.toast(`录制已达上限，自动停止（${this.replay.frameCount} 帧），可导出回放`);
+          }
+        }
         let input: (ReplayInput & { id: number }) | undefined;
         if (this.replaying) {
           const playback = this.replay?.nextInput();
@@ -496,7 +522,12 @@ class Game {
     this.vehicles.sync(this.world, alpha, this.selectedId, this.controlling, this.rig.mode === 'top');
     this.pedestrians.sync(this.world, alpha);
     this.overlay.update(this.world, this.clock);
-    if (this.built) for (const l of this.built.lamps) l.mesh.material = this.built.lampMaterials[l.ctrl.state(l.group)];
+    if (this.built) {
+      for (const l of this.built.lamps) {
+        l.mesh.material = this.built.lampMaterials[l.ctrl.state(l.group, 'straight')];
+        if (l.arrow) l.arrow.material = this.built.arrowMaterials[l.ctrl.state(l.group, 'left')];
+      }
+    }
     const v = this.selected;
     this.rig.update(real, v ? { v, pose: interpolatedPose(v, alpha) } : null);
     this.renderer.info.reset();
@@ -516,7 +547,7 @@ class Game {
     if (this.replay?.isRecording) lines.push(`<div class="accent">记录中 · ${this.replay.frameCount} 帧</div>`);
     if (this.replaying) lines.push(`<div class="accent">回放 ${this.replay?.playbackIndex}/${this.replay?.frameCount}</div>`);
     const event = this.score.events.at(-1);
-    if (event && event.time > this.world.time - 3) lines.push(`<div class="accent">${{ redLight: '闯红灯', wrongWay: '逆行', collision: '碰撞' }[event.type]} −${event.penalty}</div>`);
+    if (event && event.time > this.score.elapsed - 3) lines.push(`<div class="accent">${{ redLight: '闯红灯', wrongWay: '逆行', collision: '碰撞' }[event.type]} −${event.penalty}</div>`);
     lines.push(`<div class="perf">${this.frameMs.toFixed(1)} ms · 模拟 ${this.simMs.toFixed(1)} ms</div>`, `<div class="perf">${this.renderer.info.render.calls} 次绘制 · ${this.simWorker ? 'Worker' : '主线程'}</div>`);
     if (this.paused) lines.push('<div class="accent">已暂停</div>');
     this.hud.setStatus(lines.join(''));
@@ -600,11 +631,12 @@ class Game {
       if (!def || def.seed !== data.seed) throw new Error('找不到回放对应的地图与种子；导入地图的临时 ID 不可跨会话回放');
       this.cars = data.initialVehicles.motor; this.bikes = data.initialVehicles.bikes;
       this.loadMap(data.mapId);
-      const first = this.world.vehicles[0];
+      const recorded = data.vehicleId !== null ? this.world.vehicles.find((v) => v.id === data.vehicleId) : undefined;
+      const first = recorded ?? this.world.vehicles[0];
       if (!first) throw new Error('回放需要至少一辆车');
+      if (!recorded && data.vehicleId !== null) this.hud.toast('找不到录像中的车辆，改为回放到第一辆车');
       this.select(first.id); this.takeControl();
-      this.replay = new Replay({ seed: data.seed, mapId: data.mapId, initialVehicles: data.initialVehicles, dt: data.dt });
-      this.replay.startPlayback(data);
+      this.replay = new Replay({ seed: data.seed, mapId: data.mapId, initialVehicles: data.initialVehicles, dt: data.dt, vehicleId: data.vehicleId });
       this.replaying = true;
       this.hud.setRecording(false);
       this.hud.toast(`开始回放 ${data.frames.length} 帧`);

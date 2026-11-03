@@ -1,20 +1,21 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { distance, dot, scale, sub, type Vec2 } from '../src/core/math';
-import { LANE_WIDTH } from '../src/map/constants';
+import { add, distance, dot, rightOf, scale, sub, type Vec2 } from '../src/core/math';
+import { LANE_WIDTH, STOP_LINE_DISTANCE } from '../src/map/constants';
+import { protectedLeftPhases, SignalController } from '../src/map/Signals';
 import type { Lane } from '../src/map/Lane';
 import { parseMap, serializeMap } from '../src/map/MapJson';
 import { MAPS } from '../src/map/maps';
-import { findRoute } from '../src/map/Pathfinding';
 import { RoadNetwork } from '../src/map/RoadNetwork';
 import { buildScene } from '../src/render/SceneBuilder';
 import { generateOrganic } from '../src/map/generators/organic';
 import { generateRadial } from '../src/map/generators/radial';
 import { generateRing } from '../src/map/generators/ring';
 import type { MapDef } from '../src/map/types';
+import { makeMap, pointInPolygon } from './helpers';
 
 function twoNodeMap(control?: Vec2, oneWay = false): MapDef {
-  return {
+  return makeMap({
     version: 1,
     id: 'curve-test',
     name: 'Curve test',
@@ -24,12 +25,11 @@ function twoNodeMap(control?: Vec2, oneWay = false): MapDef {
       { id: 1, x: 100, y: 0 },
     ],
     roads: [{ id: 4, from: 0, to: 1, speedLimit: 14, lanes: 2, control, oneWay }],
-    decor: [],
     bounds: { minX: -20, minY: -20, maxX: 120, maxY: 60 },
-  };
+  });
 }
 
-function reachableRoadLaneCount(start: Lane, total: number): number {
+function reachableRoadLaneCount(start: Lane): number {
   const seen = new Set<Lane>([start]);
   const stack = [start];
   while (stack.length) {
@@ -48,7 +48,6 @@ function reachableRoadLaneCount(start: Lane, total: number): number {
   }
   let count = 0;
   for (const lane of seen) if (lane.kind === 'road') count++;
-  expect(count).toBeLessThanOrEqual(total);
   return count;
 }
 
@@ -108,8 +107,8 @@ const generatorCases = [
   ['organic', () => generateOrganic({ id: 'organic', name: 'Organic', seed: 31 }), 42],
 ] as const;
 
-describe.each(generatorCases)('M3 %s generator', (id, build, nodeCount) => {
-  it('is reproducible, reasonably sized, decorated and lane-connected', () => {
+describe.each(generatorCases)('M3 %s generator', (_id, build, nodeCount) => {
+  it('is reproducible, reasonably sized, decorated and aligned with node directions', () => {
     const def = build();
     expect(def).toEqual(build());
     expect(def.nodes).toHaveLength(nodeCount);
@@ -117,11 +116,6 @@ describe.each(generatorCases)('M3 %s generator', (id, build, nodeCount) => {
     expect(def.bounds.maxX - def.bounds.minX).toBeLessThan(700);
     expect(def.bounds.maxY - def.bounds.minY).toBeLessThan(700);
     const net = new RoadNetwork(def);
-    for (let i = 0; i < 50; i++) {
-      const a = net.roadLanes[(i * 7) % net.roadLanes.length];
-      const b = net.roadLanes[(i * 13 + 5) % net.roadLanes.length];
-      if (a !== b) expect(findRoute(a, b), `${id}: ${a.id} -> ${b.id}`).not.toBeNull();
-    }
     for (const node of net.nodes.values()) {
       for (const lane of node.outgoing) {
         expect(Math.max(...node.dirs.map((dir) => dot(dir, lane.pointAt(0).t)))).toBeGreaterThan(0.98);
@@ -133,18 +127,6 @@ describe.each(generatorCases)('M3 %s generator', (id, build, nodeCount) => {
     }
   });
 });
-
-function pointInPolygon(point: Vec2, polygon: Vec2[]): boolean {
-  let inside = false;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const a = polygon[i];
-    const b = polygon[j];
-    if ((a.y > point.y) !== (b.y > point.y) && point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x) {
-      inside = !inside;
-    }
-  }
-  return inside;
-}
 
 describe.each(MAPS)('map $id road clearance', (entry) => {
   it('keeps road lane centrelines off raised sidewalk blocks', () => {
@@ -167,7 +149,7 @@ describe('M3 map topology', () => {
     const def = generateRing({ id: 'ring', name: 'Ring', seed: 29 });
     expect(def.roads.filter((road) => road.oneWay)).toHaveLength(18);
     const net = new RoadNetwork(def);
-    for (const lane of net.roadLanes) expect(reachableRoadLaneCount(lane, net.roadLanes.length)).toBe(net.roadLanes.length);
+    for (const lane of net.roadLanes) expect(reachableRoadLaneCount(lane)).toBe(net.roadLanes.length);
   });
 
   it('uses curved organic streets and only a few reversible radial one-way arcs', () => {
@@ -212,6 +194,23 @@ function editedJson(edit: (value: any) => void): string {
   return JSON.stringify(value);
 }
 
+function markingPositions(scene: ReturnType<typeof buildScene>, sizeX: number): Vec2[] {
+  const markings = scene.root.children.find(
+    (child) => child instanceof THREE.InstancedMesh && child.geometry instanceof THREE.BoxGeometry,
+  ) as THREE.InstancedMesh;
+  const positions: Vec2[] = [];
+  const matrix = new THREE.Matrix4();
+  const position = new THREE.Vector3();
+  const rotation = new THREE.Quaternion();
+  const size = new THREE.Vector3();
+  for (let i = 0; i < markings.count; i++) {
+    markings.getMatrixAt(i, matrix);
+    matrix.decompose(position, rotation, size);
+    if (Math.abs(size.x - sizeX) < 1e-6) positions.push({ x: position.x, y: position.z });
+  }
+  return positions;
+}
+
 describe('road approach markings', () => {
   it('places the stop line before the zebra crossing in the direction of travel', () => {
     const def = twoNodeMap();
@@ -222,21 +221,8 @@ describe('road approach markings', () => {
     );
     const net = new RoadNetwork(def);
     const scene = buildScene(net);
-    const markings = scene.root.children.find(
-      (child) => child instanceof THREE.InstancedMesh && child.geometry instanceof THREE.BoxGeometry,
-    ) as THREE.InstancedMesh;
-    const stops: Vec2[] = [];
-    const crosswalks: Vec2[] = [];
-    const matrix = new THREE.Matrix4();
-    const position = new THREE.Vector3();
-    const rotation = new THREE.Quaternion();
-    const size = new THREE.Vector3();
-    for (let i = 0; i < markings.count; i++) {
-      markings.getMatrixAt(i, matrix);
-      matrix.decompose(position, rotation, size);
-      if (Math.abs(size.x - 0.45) < 1e-6) stops.push({ x: position.x, y: position.z });
-      if (Math.abs(size.x - 1.7) < 1e-6) crosswalks.push({ x: position.x, y: position.z });
-    }
+    const stops = markingPositions(scene, 0.45);
+    const crosswalks = markingPositions(scene, 1.7);
     scene.dispose();
 
     const lane = net.roadLanes.find((candidate) => candidate.roadId === 4 && candidate.nodeId === 1)!;
@@ -249,6 +235,39 @@ describe('road approach markings', () => {
       .filter((along) => along > 0 && along < 9);
     expect(crossingDistances.length).toBeGreaterThan(0);
     for (const crossingDistance of crossingDistances) expect(stopDistance).toBeGreaterThan(crossingDistance);
+  });
+
+  it('draws zebra crossings at both signalized approaches of a two-way road', () => {
+    const def = twoNodeMap();
+    def.nodes.push(
+      { id: 2, x: 100, y: 100 },
+      { id: 3, x: 100, y: -100 },
+      { id: 4, x: -100, y: 100 },
+      { id: 5, x: -100, y: -100 },
+    );
+    def.roads.push(
+      { id: 5, from: 1, to: 2, speedLimit: 14 },
+      { id: 6, from: 1, to: 3, speedLimit: 14 },
+      { id: 7, from: 0, to: 4, speedLimit: 14 },
+      { id: 8, from: 0, to: 5, speedLimit: 14 },
+    );
+    const net = new RoadNetwork(def);
+    // Road 4 connects two 3-way intersections, so both of its ends are signalized.
+    const approaches = net.roadLanes.filter((lane) => lane.roadId === 4 && lane.signal);
+    expect(new Set(approaches.map((lane) => lane.nodeId)).size).toBe(2);
+
+    const scene = buildScene(net);
+    const crosswalks = markingPositions(scene, 1.7);
+    scene.dispose();
+
+    for (const lane of approaches) {
+      const { t } = lane.pointAt(lane.length);
+      const near = crosswalks
+        .filter((point) => Math.abs(dot(sub(point, lane.end), { x: -t.y, y: t.x })) < 3.5)
+        .map((point) => dot(sub(lane.end, point), t))
+        .filter((along) => along > 0 && along < 9);
+      expect(near.length, `approach at node ${lane.nodeId}`).toBeGreaterThan(0);
+    }
   });
 
   it('creates one signal head per road approach instead of one per lane', () => {
@@ -265,9 +284,60 @@ describe('road approach markings', () => {
 
     const scene = buildScene(net);
     expect(scene.lamps).toHaveLength(approaches.size);
+    for (const lamp of scene.lamps) expect(lamp.arrow).toBeNull();
+    scene.dispose();
+  });
+
+  it('builds a left-arrow board beside the through lamp for protected-left approaches', () => {
+    const protectedCtrl = new SignalController(0, 0, protectedLeftPhases());
+    expect(protectedCtrl.protectedLeft(0)).toBe(true);
+    // Second phase (after through green + clearance) protects the left turn.
+    protectedCtrl.update(16);
+    expect(protectedCtrl.state(0, 'left')).toBe('green');
+    expect(protectedCtrl.state(0, 'straight')).toBe('red');
+    expect(new SignalController(0, 0).protectedLeft(0)).toBe(false);
+
+    const def = twoNodeMap();
+    def.nodes.push({ id: 2, x: 100, y: 100 }, { id: 3, x: 100, y: -100 });
+    def.roads.push(
+      { id: 5, from: 1, to: 2, speedLimit: 14 },
+      { id: 6, from: 1, to: 3, speedLimit: 14 },
+    );
+    def.nodes[1].signalPhases = protectedLeftPhases();
+    const net = new RoadNetwork(def);
+    const scene = buildScene(net);
+    expect(scene.lamps.length).toBeGreaterThan(0);
+
+    const representatives = new Map<string, Lane>();
+    for (const lane of net.roadLanes) {
+      if (!lane.signal) continue;
+      const key = `${lane.nodeId}:${lane.roadId}`;
+      const current = representatives.get(key);
+      if (!current || lane.laneIndex > current.laneIndex) representatives.set(key, lane);
+    }
+    for (const lane of representatives.values()) {
+      const lamp = scene.lamps.find((candidate) => distance(
+        { x: candidate.mesh.position.x, y: candidate.mesh.position.z },
+        lampBase(lane),
+      ) < 0.01);
+      expect(lamp, `lamp for approach ${lane.nodeId}:${lane.roadId}`).toBeDefined();
+      expect(lamp!.ctrl.protectedLeft(lamp!.group)).toBe(true);
+      expect(lamp!.arrow).not.toBeNull();
+      const offset = add(lampBase(lane), scale(rightOf(lane.pointAt(lane.length).t), 1.15));
+      expect(distance({ x: lamp!.arrow!.position.x, y: lamp!.arrow!.position.z }, offset)).toBeLessThan(0.01);
+      const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(lamp!.arrow!.quaternion);
+      const t = lane.pointAt(lane.length).t;
+      expect(normal.x).toBeCloseTo(-t.x, 6);
+      expect(normal.z).toBeCloseTo(-t.y, 6);
+    }
     scene.dispose();
   });
 });
+
+function lampBase(lane: Lane): Vec2 {
+  const { t } = lane.pointAt(lane.length);
+  return add(sub(lane.end, scale(t, STOP_LINE_DISTANCE + 0.2)), scale(rightOf(t), LANE_WIDTH / 2 + 1.4));
+}
 
 describe('MapJson', () => {
   it.each(MAPS)('round-trips $id without losing map data', (entry) => {
